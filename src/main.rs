@@ -1,13 +1,17 @@
 use std::collections::HashSet;
 use std::error::Error;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
 
+use futures::future::{BoxFuture, FutureExt};
 use mime::Mime;
 use once_cell::sync::Lazy;
 use reqwest::header::CONTENT_TYPE;
 use reqwest::{get, Response};
 use scraper::{Html, Selector};
+use tokio::fs::{create_dir, metadata, File};
+use tokio::io::AsyncWriteExt;
 use tokio::spawn;
 use tokio::sync::{Mutex, Semaphore};
 use tokio::task::JoinHandle;
@@ -78,7 +82,7 @@ async fn main() {
 async fn main_process() -> Result<(), Box<dyn Error + Send + Sync>> {
     // TODO replace with clap
     let args = Args {
-        url: "http://git.wardy/patch.git/objects/8a".to_string(),
+        url: "http://git.wardy/patch.git/objects/".to_string(),
         target: "download".to_string(),
         concurrent_fetch: 10,
         debug: true,
@@ -290,24 +294,45 @@ async fn download(
     file: &str,
     mut response: Response,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    // Build path
+    let mut path = PathBuf::from(&state.args.target);
+
+    path.push(file);
+
+    if url.ends_with('/') {
+        path.push("__file.dat")
+    }
+
+    // Create directory if necessary
+    if let Some(parent) = path.parent() {
+        create_directories(state, parent).await?;
+    }
+
+    // Calculate size string
     let size = response
         .content_length()
         .map(|s| format!("{s}"))
         .unwrap_or(String::from("unknown"));
 
-    debug!(state, "Downloading {url} to {file} (size {size})...");
+    debug!(
+        state,
+        "Downloading {url} to {} (size {size})...",
+        path.display()
+    );
 
-    // TODO create dir
-    //let mut file = File::create(file).await?;
+    // Open the file
+    let mut file = File::create(path).await?;
 
     if state.args.debug_delay != 0 {
         sleep(Duration::from_millis(state.args.debug_delay)).await;
     }
 
+    // Read next chunk
     while let Some(chunk) = response.chunk().await? {
         debug!(state, "Read {} bytes", chunk.len());
 
-        // TODO file.write_all(&chunk).await?;
+        // Write chunk to the file
+        file.write_all(&chunk).await?;
 
         if state.args.debug_delay != 0 {
             sleep(Duration::from_millis(state.args.debug_delay)).await;
@@ -315,6 +340,64 @@ async fn download(
     }
 
     Ok(())
+}
+
+static EMPTY_PATH: Lazy<&Path> = Lazy::new(|| Path::new(""));
+
+fn create_directories<'a>(
+    state: &'a ArcState,
+    path: &'a Path,
+) -> BoxFuture<'a, Result<(), Box<dyn Error + Send + Sync>>> {
+    async move {
+        if path != *EMPTY_PATH {
+            // Create parents first
+            if let Some(parent) = path.parent() {
+                create_directories(state, parent).await?;
+            }
+
+            let mut tried = false;
+
+            loop {
+                // Get path metadata
+                match metadata(path).await {
+                    Err(e) => match e.kind() {
+                        // Failed - if not found try and create
+                        std::io::ErrorKind::NotFound => match create_dir(path).await {
+                            Ok(()) => {
+                                // Created
+                                debug!(state, "Created directory {}", path.display());
+                            }
+                            Err(e) => {
+                                // Failed to create - try two times to avoid races
+                                if tried {
+                                    Err(e)?;
+                                }
+
+                                tried = true;
+                                continue;
+                            }
+                        },
+                        _ => Err(e)?,
+                    },
+                    Ok(meta) => {
+                        // Got metadata. Is it a directory?
+                        if !meta.is_dir() {
+                            // Something exists but it's not a directory
+                            Err(format!(
+                                "{} already exists and is not a directory",
+                                path.display()
+                            ))?
+                        }
+                    }
+                }
+
+                break;
+            }
+        }
+
+        Ok(())
+    }
+    .boxed()
 }
 
 fn check_url(url: &Url) -> Result<(), String> {
