@@ -13,7 +13,7 @@ macro_rules! error {
 macro_rules! debug {
     ($state:ident, $level:expr, $($arg:tt)*) => (
         {
-            if $level <= $state.as_ref().args.debug {
+            if $level <= $state.debug_level() {
                 eprintln!("DEBUG: {}", format!($($arg)*));
             }
         }

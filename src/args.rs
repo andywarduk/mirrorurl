@@ -41,12 +41,18 @@ pub struct Args {
     /// Fetch timout in minutes
     #[clap(long = "fetch-timeout", default_value_t = 5)]
     pub fetch_timeout: u64,
+
+    /// Skip list file (JSON array file containing URLs or relative file paths to skip)
+    #[clap(short = 's', long = "skip_file")]
+    pub skip_file: Option<String>,
 }
 
-pub fn get_args() -> Result<Args, Box<dyn Error>> {
-    let args = Args::try_parse()?;
+impl Args {
+    pub fn parse() -> Result<Self, Box<dyn Error + Send + Sync>> {
+        let args = Args::try_parse()?;
 
-    Ok(args)
+        Ok(args)
+    }
 }
 
 fn default_concurrent_requests() -> usize {
