@@ -4,10 +4,10 @@ use reqwest::header::ETAG;
 use reqwest::Response;
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use url::Url;
 
 use crate::dir::*;
 use crate::output::{debug, error, output};
+use crate::url::Url;
 use crate::ArcState;
 
 /// Downloads a URL to a file

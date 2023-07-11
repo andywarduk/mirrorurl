@@ -1,12 +1,12 @@
 use std::error::Error;
 
 use reqwest::header::{HeaderMap, HeaderValue};
-use url::Url;
 
 use crate::download::download;
 use crate::html::{is_html, process_html};
 use crate::output::{debug, error, output};
 use crate::state::ArcState;
+use crate::url::Url;
 
 pub async fn walk(state: &ArcState, url: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
     // Already seen this URL?

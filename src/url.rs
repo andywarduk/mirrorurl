@@ -1,17 +1,32 @@
-use url::{Position, Url};
+use url::Position;
+pub use url::Url;
 
-/// Returns true if test URL is relative to a base URL
-pub fn url_relative_to(test_url: &Url, base_url: &Url) -> bool {
-    test_url.host_str() == base_url.host_str()
-        && test_url[Position::BeforePath..].starts_with(&base_url[Position::BeforePath..])
+pub trait UrlExt {
+    /// Returns true if test URL is relative to a base URL
+    fn is_relative_to(&self, base_url: &Url) -> bool;
+
+    /// Returns the relative path for a URL from a base URL
+    fn relative_path<'a>(&'a self, base_url: &Url) -> Option<&'a str>;
+
+    /// Returns the full path of the URL including query and hash strings
+    fn full_path(&self) -> &str;
 }
 
-/// Returns the relative path for a URL from a base URL
-pub fn url_relative_path<'a>(url: &'a Url, base_url: &Url) -> Option<&'a str> {
-    if url_relative_to(url, base_url) {
-        let chop_pos = base_url[Position::BeforePath..].len();
-        Some(&url[Position::BeforePath..][chop_pos..])
-    } else {
-        None
+impl UrlExt for Url {
+    fn is_relative_to(&self, base_url: &Url) -> bool {
+        self.host_str() == base_url.host_str() && self.full_path().starts_with(base_url.full_path())
+    }
+
+    fn relative_path<'a>(&'a self, base_url: &Url) -> Option<&'a str> {
+        if self.is_relative_to(base_url) {
+            let chop_pos = base_url[Position::BeforePath..].len();
+            Some(&self.full_path()[chop_pos..])
+        } else {
+            None
+        }
+    }
+
+    fn full_path(&self) -> &str {
+        &self[Position::BeforePath..]
     }
 }

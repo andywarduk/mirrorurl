@@ -7,10 +7,10 @@ use reqwest::Response;
 use scraper::{Html, Selector};
 use tokio::spawn;
 use tokio::task::JoinHandle;
-use url::Url;
 
 use crate::output::debug;
 use crate::state::{ArcState, State};
+use crate::url::{Url, UrlExt};
 use crate::walk::walk;
 
 /// Process all of the links in an HTML document returning a list of join handles for spawned tasks
@@ -122,7 +122,8 @@ fn process_href(
                 return None;
             }
 
-            if !state.url_is_relative(&href_url) {
+            // Check the URL is relative to the base URL
+            if !href_url.is_relative_to(state.url()) {
                 debug!(
                     state,
                     1, "Skipping: {href_url} is not relative to the base {base_url}"

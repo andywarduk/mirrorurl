@@ -7,13 +7,12 @@ use reqwest::redirect::Policy;
 use reqwest::Client;
 use tokio::sync::{Mutex, Semaphore, SemaphorePermit};
 use tokio::time::{sleep, Duration};
-use url::Url;
 
 use crate::args::Args;
 use crate::etags::ETags;
 use crate::output::debug;
 use crate::skip::SkipList;
-use crate::url::{url_relative_path, url_relative_to};
+use crate::url::{Url, UrlExt};
 
 /// Program state shared between all threads
 pub struct State {
@@ -117,18 +116,15 @@ impl State {
         &self.url
     }
 
-    /// Tests if a URL is relative to the base URL
-    pub fn url_is_relative(&self, url: &Url) -> bool {
-        url_relative_to(url, &self.url)
-    }
-
     /// Build file relative path for a given URL
     pub fn path_for_url(&self, url: &Url) -> PathBuf {
         // Start with download directory
         let mut path = PathBuf::from(&self.args.target);
 
         // Get relative path of the URL from the base
-        let rel = url_relative_path(url, &self.url).expect("URL should be relative");
+        let rel = url
+            .relative_path(&self.url)
+            .expect("URL should be relative");
 
         // Trim leading slashes from the relative path
         let rel = rel.trim_start_matches('/');
@@ -195,8 +191,8 @@ impl State {
         let redirect_policy = Policy::custom(move |attempt| {
             let attempt_url = attempt.url();
 
-            // Check no more that 10 redirects and that path partially matches
-            if attempt.previous().len() <= 10 && url_relative_to(attempt_url, &url) {
+            // Check no more that 10 redirects and that path is relative to the base URL
+            if attempt.previous().len() <= 10 && attempt_url.is_relative_to(&url) {
                 attempt.follow()
             } else {
                 attempt.stop()
