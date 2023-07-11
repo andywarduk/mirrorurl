@@ -26,14 +26,6 @@ pub struct Args {
     #[clap(short = 'u', long = "unnamed", default_value_t = String::from("__file.dat"))]
     pub unnamed: String,
 
-    /// Increase debug message level
-    #[clap(short = 'd', long = "debug", action = clap::ArgAction::Count)]
-    pub debug: u8,
-
-    /// Insert an artificial delay in the data fetch for debugging
-    #[clap(long = "debug-delay", default_value_t = 0)]
-    pub debug_delay: u64,
-
     /// Connection timout in seconds
     #[clap(long = "connect-timeout", default_value_t = 60)]
     pub connect_timeout: u64,
@@ -43,8 +35,20 @@ pub struct Args {
     pub fetch_timeout: u64,
 
     /// Skip list file (JSON array file containing URLs or relative file paths to skip)
-    #[clap(short = 's', long = "skip_file")]
+    #[clap(short = 's', long = "skip-file")]
     pub skip_file: Option<String>,
+
+    /// Don't use etags to detect out of date files
+    #[clap(short = 'e', long = "no-etags")]
+    pub no_etags: bool,
+
+    /// Increase debug message level
+    #[clap(short = 'd', long = "debug", action = clap::ArgAction::Count)]
+    pub debug: u8,
+
+    /// Insert an artificial delay in the data fetch for debugging
+    #[clap(long = "debug-delay", default_value_t = 0)]
+    pub debug_delay: u64,
 }
 
 impl Args {

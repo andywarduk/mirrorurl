@@ -3,11 +3,14 @@ use std::error::Error;
 use reqwest::header::{HeaderMap, HeaderValue};
 
 use crate::download::download;
-use crate::html::{is_html, process_html};
+use crate::html::process_html;
 use crate::output::{debug, error, output};
+use crate::response::ResponseExt;
 use crate::state::ArcState;
 use crate::url::Url;
 
+/// Loads data from a URL. If the data is HTML, parse the document and follow links.
+/// Use loaded etags to determine if the resource has already been downloaded and skip if so.
 pub async fn walk(state: &ArcState, url: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
     // Already seen this URL?
     if !state.add_processed_url(url.clone()).await {
@@ -65,7 +68,7 @@ pub async fn walk(state: &ArcState, url: &Url) -> Result<(), Box<dyn Error + Sen
     }
 
     // Is the document HTML?
-    if is_html(state, &response) {
+    if response.is_html(state) {
         // Get HTML body
         let html = response.text().await?;
 

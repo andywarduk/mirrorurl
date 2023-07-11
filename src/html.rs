@@ -1,19 +1,16 @@
 use std::error::Error;
 
-use mime::Mime;
 use once_cell::sync::Lazy;
-use reqwest::header::CONTENT_TYPE;
-use reqwest::Response;
 use scraper::{Html, Selector};
 use tokio::spawn;
 use tokio::task::JoinHandle;
 
 use crate::output::debug;
-use crate::state::{ArcState, State};
+use crate::state::ArcState;
 use crate::url::{Url, UrlExt};
 use crate::walk::walk;
 
-/// Process all of the links in an HTML document returning a list of join handles for spawned tasks
+/// Process all of the links in an HTML document returning a list of join handles for spawned download tasks
 pub fn process_html(
     state: &ArcState,
     url: &Url,
@@ -25,8 +22,8 @@ pub fn process_html(
     // Get hrefs out of the document
     let hrefs = parse_html(state, html);
 
+    // Process each href
     for href in hrefs {
-        // Look for href on each anchor
         if let Some(join) = process_href(state, url, &href) {
             join_handles.push(join);
         }
@@ -35,48 +32,16 @@ pub fn process_html(
     join_handles
 }
 
-static MIME_HTML: Lazy<Mime> = Lazy::new(|| "text/html".parse::<Mime>().unwrap());
-static MIME_XHTML: Lazy<Mime> = Lazy::new(|| "application/xhtml+xml".parse::<Mime>().unwrap());
-
-pub fn is_html(state: &ArcState, response: &Response) -> bool {
-    // Get content type
-    if let Some(mime_type) = response
-        .headers()
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<Mime>().ok())
-    {
-        debug!(state, 2, "MIME type of {} is {mime_type}", response.url());
-
-        // Is it html or xhtml?
-        mime_types_equal(&mime_type, &MIME_HTML) || mime_types_equal(&mime_type, &MIME_XHTML)
-    } else {
-        debug!(
-            state,
-            1,
-            "No content (MIME) type received for {}",
-            response.url()
-        );
-
-        false
-    }
-}
-
-/// Returns true if MIME types are equal
-fn mime_types_equal(a: &Mime, b: &Mime) -> bool {
-    a.type_() == b.type_() && a.subtype() == b.subtype()
-}
+/// Anchor selector
+static ANCHOR_SEL: Lazy<Selector> = Lazy::new(|| Selector::parse("a").unwrap());
 
 /// Parse an HTML document and return a list of href links to process
 fn parse_html(state: &ArcState, html: String) -> Vec<String> {
     // Parse the document
     let document = Html::parse_document(&html);
 
-    // Create anchor selector
-    let anchor_sel = Selector::parse("a").unwrap();
-
     // Select all anchors
-    let anchors = document.select(&anchor_sel);
+    let anchors = document.select(&ANCHOR_SEL);
 
     // Get all hrefs
     anchors
@@ -105,7 +70,7 @@ fn process_href(
         Ok(href_url) => {
             debug!(state, 2, "href {href} -> {href_url}");
 
-            if let Err(e) = State::check_url(&href_url) {
+            if let Err(e) = href_url.is_handled() {
                 debug!(state, 1, "Skipping: {e}");
                 return None;
             }

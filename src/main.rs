@@ -14,12 +14,11 @@ use state::{ArcState, State};
 mod walk;
 use walk::walk;
 
-mod html;
-
 mod download;
-
-mod dir;
 mod etags;
+mod html;
+mod mime;
+mod response;
 mod skip;
 mod url;
 

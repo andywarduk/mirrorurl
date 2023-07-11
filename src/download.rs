@@ -1,12 +1,12 @@
 use std::error::Error;
+use std::path::PathBuf;
 
 use reqwest::header::ETAG;
-use reqwest::Response;
-use tokio::fs::File;
+use tokio::fs::{create_dir_all, File};
 use tokio::io::AsyncWriteExt;
 
-use crate::dir::*;
 use crate::output::{debug, error, output};
+use crate::response::Response;
 use crate::url::Url;
 use crate::ArcState;
 
@@ -18,62 +18,16 @@ pub async fn download(
     mut response: Response,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     // Build full download path
-    let path = state.path_for_url(final_url);
-
-    // Get download relative path
-    let rel_path = state.download_relative_path(&path)?;
-
-    // Check skip list
-    if state.path_in_skip_list(rel_path) {
-        debug!(state, 1, "Skipping: Relative path is in the skip list");
-    } else {
-        // Create directory if necessary
-        if let Some(parent) = path.parent() {
-            create_directories(state, parent).await?;
-        }
-
-        // Calculate size string
-        let size = response
-            .content_length()
-            .map(|s| format!("{s}"))
-            .unwrap_or(String::from("unknown"));
-
-        output!(
-            "Downloading {final_url} to {} (size {size})",
-            path.display()
-        );
-
-        // Open the file
-        let mut file = File::create(path).await?;
-
-        // Debug delay
-        state.debug_delay().await;
-
-        // Read next chunk
-        while let Some(chunk) = response.chunk().await? {
-            debug!(state, 2, "Read {} bytes", chunk.len());
-
-            // Write chunk to the file
-            file.write_all(&chunk).await?;
-
-            // Debug delay
-            state.debug_delay().await;
-        }
+    match state.path_for_url(final_url) {
+        Ok(path) => download_to_path(state, final_url, &mut response, path).await?,
+        Err(e) => debug!(state, 1, "Skipping: {e}"),
     }
 
     // Get response etag
     match response.headers().get(ETAG).map(|value| value.to_str()) {
         Some(Ok(etag)) => {
             // Add etag for original and final url (if different)
-            let mut urls = Vec::with_capacity(2);
-
-            if url != final_url {
-                urls.push(url);
-            }
-
-            urls.push(final_url);
-
-            state.add_etags(urls, etag).await;
+            state.add_etags(vec![url, final_url], etag).await;
         }
         Some(_) => {
             error!("Invalid etag header received from {url}");
@@ -81,6 +35,60 @@ pub async fn download(
         None => {
             debug!(state, 1, "No etag header received");
         }
+    }
+
+    Ok(())
+}
+
+pub async fn download_to_path(
+    state: &ArcState,
+    final_url: &Url,
+    response: &mut Response,
+    path: PathBuf,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    // Create directories if necessary
+    if let Some(parent) = path.parent() {
+        if !parent.is_dir() {
+            create_dir_all(parent)
+                .await
+                .map_err(|e| format!("Unable to create directory {}: {e}", path.display()))?;
+        }
+    }
+
+    // Calculate size string
+    let size = response
+        .content_length()
+        .map(|s| format!("{s}"))
+        .unwrap_or(String::from("unknown"));
+
+    output!(
+        "Downloading {final_url} to {} (size {size})",
+        path.display()
+    );
+
+    // Open the file
+    let mut file = File::create(&path)
+        .await
+        .map_err(|e| format!("Unable to create file {}: {e}", path.display()))?;
+
+    // Debug delay
+    state.debug_delay().await;
+
+    // Read next chunk
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| format!("Error downloading chunk: {e}"))?
+    {
+        debug!(state, 2, "Read {} bytes", chunk.len());
+
+        // Write chunk to the file
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| format!("Error writing to {}: {e}", path.display()))?;
+
+        // Debug delay
+        state.debug_delay().await;
     }
 
     Ok(())
