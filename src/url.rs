@@ -40,7 +40,7 @@ impl UrlExt for Url {
             let chop_pos = base_path.len();
             let rel = &self.full_path()[chop_pos..];
 
-            if base_path.ends_with('/') || rel.starts_with('/') {
+            if rel.is_empty() || base_path.ends_with('/') || rel.starts_with('/') {
                 // Trim leading slashes from the relative path
                 let rel = rel.trim_start_matches('/');
 

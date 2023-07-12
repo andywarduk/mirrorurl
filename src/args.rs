@@ -23,15 +23,15 @@ pub struct Args {
     pub threads: usize,
 
     /// File name to use for unnamed files
-    #[clap(short = 'u', long = "unnamed", default_value_t = String::from("__file.dat"))]
+    #[clap(short = 'u', long = "unnamed", default_value_t = default_unnamed())]
     pub unnamed: String,
 
     /// Connection timout in seconds
-    #[clap(long = "connect-timeout", default_value_t = 60)]
+    #[clap(long = "connect-timeout", default_value_t = default_connect_timeout())]
     pub connect_timeout: u64,
 
     /// Fetch timout in minutes
-    #[clap(long = "fetch-timeout", default_value_t = 5)]
+    #[clap(long = "fetch-timeout", default_value_t = default_fetch_timeout())]
     pub fetch_timeout: u64,
 
     /// Skip list file (JSON array file containing URLs or relative file paths to skip)
@@ -51,6 +51,24 @@ pub struct Args {
     pub debug_delay: u64,
 }
 
+impl Default for Args {
+    fn default() -> Self {
+        Self {
+            url: Default::default(),
+            target: Default::default(),
+            concurrent_fetch: default_concurrent_requests(),
+            threads: default_threads(),
+            unnamed: default_unnamed(),
+            connect_timeout: default_connect_timeout(),
+            fetch_timeout: default_fetch_timeout(),
+            skip_file: Default::default(),
+            no_etags: Default::default(),
+            debug: Default::default(),
+            debug_delay: Default::default(),
+        }
+    }
+}
+
 impl Args {
     pub fn parse() -> Result<Self, Box<dyn Error + Send + Sync>> {
         let args = Args::try_parse()?;
@@ -65,6 +83,18 @@ fn default_concurrent_requests() -> usize {
 
 fn default_threads() -> usize {
     min(default_concurrent_requests(), num_cpus::get())
+}
+
+fn default_unnamed() -> String {
+    String::from("__file.dat")
+}
+
+fn default_connect_timeout() -> u64 {
+    60
+}
+
+fn default_fetch_timeout() -> u64 {
+    5
 }
 
 fn clamp_concurrent(s: &str) -> Result<usize, String> {

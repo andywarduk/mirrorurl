@@ -64,3 +64,5 @@ async fn process(args: Args) -> Result<(), Box<dyn Error + Send + Sync>> {
 
     Ok(())
 }
+
+mod tests;
