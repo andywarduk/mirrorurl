@@ -27,7 +27,7 @@ fn main() {
         match start() {
             Ok(_) => 0,
             Err(e) => {
-                error!("{}", e.to_string());
+                error!("{e}");
                 1
             }
         }
