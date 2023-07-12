@@ -68,7 +68,7 @@ fn process_href(
     // Join href to the base URL if necessary
     match base_url.join(href) {
         Ok(href_url) => {
-            debug!(state, 2, "href {href} -> {href_url}");
+            debug!(state, 2, "href {href} of {base_url} -> {href_url}");
 
             if let Err(e) = href_url.is_handled() {
                 debug!(state, 1, "Skipping: {e}");

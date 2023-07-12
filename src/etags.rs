@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
+use std::path::PathBuf;
 
 /// Map of URLs to etags
 #[derive(Default)]
@@ -32,12 +33,22 @@ impl ETags {
 
     /// Save mapping to a JSON file
     pub fn save_to_file(&self, file: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let fh = File::create(file).map_err(|e| format!("Error creating {file}: {e}"))?;
+        let path = PathBuf::from(file);
 
-        let writer = BufWriter::new(fh);
+        let write = if let Some(parent) = path.parent() {
+            parent.is_dir()
+        } else {
+            true
+        };
 
-        serde_json::to_writer_pretty(writer, &self.etags)
-            .map_err(|e| format!("Error writing {file}: {e}"))?;
+        if write {
+            let fh = File::create(path).map_err(|e| format!("Error creating {file}: {e}"))?;
+
+            let writer = BufWriter::new(fh);
+
+            serde_json::to_writer_pretty(writer, &self.etags)
+                .map_err(|e| format!("Error writing {file}: {e}"))?;
+        }
 
         Ok(())
     }
