@@ -9,6 +9,7 @@ use tempdir::TempDir;
 use tokio::fs::{read_dir, read_to_string};
 
 use crate::args::Args;
+use crate::etags::ETags;
 
 #[tokio::test]
 async fn test_404() {
@@ -28,9 +29,7 @@ async fn test_404() {
         matches!(result, Err(e) if e.to_string().starts_with("Status 404 Not Found fetching http://"))
     );
 
-    let dir_cnt = get_tmp_contents(&tmpdir).await;
-    dump_tmp_contents(&dir_cnt);
-    check_tmp_contents(&dir_cnt, &[] as &[&str; 0]);
+    check_tmp_contents(&tmpdir, &[] as &[TmpFile<&str, &str>; 0]).await;
 }
 
 #[tokio::test]
@@ -52,13 +51,85 @@ async fn test_single_file() {
     println!("{:?}", result);
     assert!(matches!(result, Ok(())));
 
-    let dir_cnt = get_tmp_contents(&tmpdir).await;
-    dump_tmp_contents(&dir_cnt);
     check_tmp_contents(
-        &dir_cnt,
-        &["download/", "download/.etags.json", "download/__file.dat"],
+        &tmpdir,
+        &[
+            TmpFile::Dir("download"),
+            TmpFile::File("download/.etags.json", "{}"),
+            TmpFile::File("download/__file.dat", file_content),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_single_file_etag() {
+    let (args, server, tmpdir) = test_setup("/file");
+
+    let file_content = "Hello, world!";
+
+    let etag_value = "etagvalue";
+
+    let etags_content = generate_etags_json(vec![(
+        server.url("/file").to_string(),
+        etag_value.to_string(),
+    )]);
+
+    // Configure the server to expect a single GET /file request and respond with the file content and etag
+    server.expect(
+        Expectation::matching(all_of!(
+            request::method_path("GET", "/file"),
+            request::headers(not(contains(key("if-none-match")))),
+        ))
+        .respond_with(
+            status_code(200)
+                .append_header("ETag", "etagvalue")
+                .body(file_content),
+        ),
     );
-    check_tmp_file(&tmpdir, "download/__file.dat", file_content).await;
+
+    // Configure the server to expect a single GET /file request with a valid If-None-Matches header and respond with 304 not modified
+    server.expect(
+        Expectation::matching(all_of!(
+            request::method_path("GET", "/file"),
+            request::headers(contains(("if-none-match", etag_value.clone()))),
+        ))
+        .respond_with(status_code(304)),
+    );
+
+    // First process
+    let result = super::process(args.clone()).await;
+
+    // Check results
+    println!("{:?}", result);
+    assert!(matches!(result, Ok(())));
+
+    check_tmp_contents(
+        &tmpdir,
+        &[
+            TmpFile::Dir("download"),
+            TmpFile::File("download/.etags.json", etags_content.as_str()),
+            TmpFile::File("download/__file.dat", file_content),
+        ],
+    )
+    .await;
+
+    // Second process
+    let result = super::process(args).await;
+
+    // Check results
+    println!("{:?}", result);
+    assert!(matches!(result, Ok(())));
+
+    check_tmp_contents(
+        &tmpdir,
+        &[
+            TmpFile::Dir("download"),
+            TmpFile::File("download/.etags.json", etags_content.as_str()),
+            TmpFile::File("download/__file.dat", file_content),
+        ],
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -84,9 +155,7 @@ async fn test_single_html_empty() {
     println!("{:?}", result);
     assert!(matches!(result, Ok(())));
 
-    let dir_cnt = get_tmp_contents(&tmpdir).await;
-    dump_tmp_contents(&dir_cnt);
-    check_tmp_contents(&dir_cnt, &[] as &[&str; 0]);
+    check_tmp_contents(&tmpdir, &[] as &[TmpFile<&str, &str>; 0]).await;
 }
 
 #[tokio::test]
@@ -138,19 +207,16 @@ async fn test_single_html() {
     println!("{:?}", result);
     assert!(matches!(result, Ok(())));
 
-    let dir_cnt = get_tmp_contents(&tmpdir).await;
-    dump_tmp_contents(&dir_cnt);
     check_tmp_contents(
-        &dir_cnt,
+        &tmpdir,
         &[
-            "download/.etags.json",
-            "download/",
-            "download/file1",
-            "download/file2",
+            TmpFile::File("download/.etags.json", "{}"),
+            TmpFile::Dir("download"),
+            TmpFile::File("download/file1", file_content),
+            TmpFile::File("download/file2", file_content),
         ],
-    );
-    check_tmp_file(&tmpdir, "download/file1", file_content).await;
-    check_tmp_file(&tmpdir, "download/file2", file_content).await;
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -208,25 +274,20 @@ async fn test_multi_html() {
     println!("{:?}", result);
     assert!(matches!(result, Ok(())));
 
-    let mut expected_contents = vec!["download/.etags.json".to_string(), "download/".to_string()];
+    let mut expected_contents = vec![
+        TmpFile::File("download/.etags.json".to_string(), "{}"),
+        TmpFile::Dir("download".to_string()),
+    ];
 
     for i in sub_pages.iter() {
-        expected_contents.push(format!("download/{i}/"));
+        expected_contents.push(TmpFile::Dir(format!("download/{i}")));
 
         for j in sub_pages.iter() {
-            expected_contents.push(format!("download/{i}/{j}"));
+            expected_contents.push(TmpFile::File(format!("download/{i}/{j}"), file_content));
         }
     }
 
-    let dir_cnt = get_tmp_contents(&tmpdir).await;
-    dump_tmp_contents(&dir_cnt);
-    check_tmp_contents(&dir_cnt, &expected_contents);
-
-    for i in sub_pages.iter() {
-        for j in sub_pages.iter() {
-            check_tmp_file(&tmpdir, &format!("download/{i}/{j}"), file_content).await;
-        }
-    }
+    check_tmp_contents(&tmpdir, &expected_contents).await;
 }
 
 // Helper functions
@@ -251,15 +312,23 @@ fn test_setup(url: &str) -> (Args, Server, TempDir) {
     (args, server, tmpdir)
 }
 
-fn dump_tmp_contents(contents: &[String]) {
+fn dump_tmp_contents(contents: &[TmpFile<String, String>]) {
     println!("Temp dir contents:");
 
     for f in contents {
-        println!("  {}", f);
+        match f {
+            TmpFile::Dir(d) => println!("  {d}/"),
+            TmpFile::File(f, c) => println!("  {f} ({} bytes)", c.len()),
+        }
     }
 }
 
-async fn get_tmp_contents(tmpdir: &TempDir) -> Vec<String> {
+enum TmpFile<S1, S2> {
+    Dir(S1),
+    File(S1, S2),
+}
+
+async fn get_tmp_contents(tmpdir: &TempDir) -> Vec<TmpFile<String, String>> {
     let mut contents = Vec::new();
 
     let mut process_paths = VecDeque::new();
@@ -289,11 +358,21 @@ async fn get_tmp_contents(tmpdir: &TempDir) -> Vec<String> {
                         rel_path.display()
                     ));
 
+                    let rel_name = rel_path
+                        .to_str()
+                        .expect("File name could not be converted to string")
+                        .to_string();
+
                     if file_type.is_dir() {
-                        contents.push(format!("{}/", rel_path.display()));
                         process_paths.push_back(full_path);
+
+                        contents.push(TmpFile::Dir(rel_name));
                     } else {
-                        contents.push(format!("{}", rel_path.display()));
+                        let content = read_to_string(&full_path)
+                            .await
+                            .expect(&format!("Failed to read file {}", full_path.display()));
+
+                        contents.push(TmpFile::File(rel_name, content));
                     }
                 }
             }
@@ -303,40 +382,65 @@ async fn get_tmp_contents(tmpdir: &TempDir) -> Vec<String> {
     contents
 }
 
-fn check_tmp_contents<S1, S2>(contents: &[S1], expected: &[S2])
+fn compare_tmp_contents<S1, S2, S3, S4>(
+    c1: &[TmpFile<S1, S2>],
+    c2: &[TmpFile<S3, S4>],
+    compare: bool,
+) where
+    S1: Deref<Target = str> + Display,
+    S2: Deref<Target = str> + Display,
+    S3: Deref<Target = str> + Display,
+    S4: Deref<Target = str> + Display,
+{
+    // Check the correct files exist
+    for f1 in c1 {
+        match f1 {
+            TmpFile::Dir(d1) => {
+                assert!(
+                    c2.iter()
+                        .filter_map(|d2| match d2 {
+                            TmpFile::Dir(d) => Some(d),
+                            _ => None,
+                        })
+                        .any(|d2| { d1.deref() == d2.deref() }),
+                    "Download directory contains file {d1}, which is not expected"
+                );
+            }
+            TmpFile::File(f1, cnt1) => {
+                match c2
+                    .iter()
+                    .find(|f| matches!(f, TmpFile::File(f2, _) if f1.deref() == f2.deref()))
+                {
+                    Some(TmpFile::File(f2, cnt2)) => {
+                        if compare {
+                            assert_eq!(
+                                cnt1.deref(),
+                                cnt2.deref(),
+                                "Contents of file {f2} incorrect"
+                            );
+                        }
+                    }
+                    _ => {
+                        panic!("Download directory contains file {f1}, which is not expected");
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn check_tmp_contents<S1, S2>(tmpdir: &TempDir, expected: &[TmpFile<S1, S2>])
 where
     S1: Deref<Target = str> + Display,
     S2: Deref<Target = str> + Display,
 {
-    for s1 in contents {
-        assert!(
-            expected.iter().any(|s2| s2.deref() == s1.deref()),
-            "Download directory contains file {s1}, which is not expected"
-        );
-    }
+    let contents = get_tmp_contents(tmpdir).await;
 
-    for s2 in expected {
-        assert!(
-            expected.iter().any(|s1| s1.deref() == s2.deref()),
-            "Download directory should contain file {s2}"
-        );
-    }
-}
+    dump_tmp_contents(&contents);
 
-async fn check_tmp_file(tmpdir: &TempDir, file: &str, expected_content: &str) {
-    let mut path = tmpdir.path().to_path_buf();
-    path.push(file);
-
-    let content = read_to_string(&path)
-        .await
-        .expect(&format!("Failed to read file {}", path.display()));
-
-    assert_eq!(
-        content,
-        expected_content,
-        "Contents of file {} incorrect",
-        path.display()
-    );
+    // Check the correct files exist
+    compare_tmp_contents(&contents, expected, false);
+    compare_tmp_contents(expected, &contents, true);
 }
 
 fn build_html_anchors_doc<A>(anchors: &[A]) -> String
@@ -364,4 +468,18 @@ where
     );
 
     doc
+}
+
+fn generate_etags_json(etag_values: Vec<(String, String)>) -> String {
+    let mut etags = ETags::default();
+
+    for (url, etag) in etag_values.into_iter() {
+        etags.add(url, etag);
+    }
+
+    let mut bytes = Vec::new();
+
+    etags.write(&mut bytes).expect("Failed to serialise etags");
+
+    String::from_utf8(bytes).expect("Failed to convert serialised etags to string")
 }

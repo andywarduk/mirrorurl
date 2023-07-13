@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::PathBuf;
 
 /// Map of URLs to etags
@@ -46,11 +46,18 @@ impl ETags {
 
             let writer = BufWriter::new(fh);
 
-            serde_json::to_writer_pretty(writer, &self.etags)
+            self.write(writer)
                 .map_err(|e| format!("Error writing {file}: {e}"))?;
         }
 
         Ok(())
+    }
+
+    pub fn write<W>(&self, writer: W) -> Result<(), Box<dyn Error + Send + Sync>>
+    where
+        W: Write,
+    {
+        Ok(serde_json::to_writer_pretty(writer, &self.etags)?)
     }
 
     /// Looks for a URL in the mapping and returns the etag if present

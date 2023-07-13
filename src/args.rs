@@ -5,7 +5,7 @@ use clap::Parser;
 
 use crate::output;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Clone, Debug)]
 #[clap(author, version, about)]
 pub struct Args {
     /// URL to mirror
