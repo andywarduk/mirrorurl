@@ -1,15 +1,9 @@
-use std::collections::VecDeque;
-use std::fmt::Display;
-use std::ops::Deref;
-
 use httptest::matchers::*;
 use httptest::responders::*;
-use httptest::{Expectation, Server};
-use tempdir::TempDir;
-use tokio::fs::{read_dir, read_to_string};
+use httptest::Expectation;
 
-use crate::args::Args;
-use crate::etags::ETags;
+mod helpers;
+use helpers::*;
 
 #[tokio::test]
 async fn test_404() {
@@ -406,196 +400,83 @@ async fn test_multi_html() {
     check_tmp_contents(&tmpdir, &expected_contents).await;
 }
 
-// Helper functions
+#[tokio::test]
+async fn test_multi_html_skiplist() {
+    let (mut args, server, tmpdir) = test_setup("/root/");
 
-fn test_setup(url: &str) -> (Args, Server, TempDir) {
-    let server = Server::run();
+    // Generate skip list
+    let (skip_path, skip_content) = generate_skiplist_json(&tmpdir, vec!["1", "2/", "3/1"]).await;
+    args.skip_file = Some(skip_path.to_str().unwrap().to_string());
 
-    let url = server.url(url);
+    // File content
+    let file_content = "Hello, world!";
 
-    let tmpdir = TempDir::new("mirrorurl_test").expect("Failed to create tmp dir");
+    // Build main document with some anchors
+    let sub_pages = (1..=4).collect::<Vec<_>>();
 
-    let mut path = tmpdir.path().to_path_buf();
-    path.push("download");
+    let main_anchors = sub_pages
+        .iter()
+        .map(|s| format!("{}/", s))
+        .collect::<Vec<_>>();
 
-    let args = Args {
-        url: url.to_string(),
-        target: path.to_string_lossy().to_string(),
-        debug: 1,
-        ..Args::default()
-    };
+    let main_html_doc = build_html_anchors_doc(&main_anchors);
 
-    (args, server, tmpdir)
-}
+    // Configure the server to expect a single GET /root request and respond with the main html document
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/root/")).respond_with(
+            status_code(200)
+                .append_header("Content-Type", "text/html")
+                .body(main_html_doc),
+        ),
+    );
 
-fn dump_tmp_contents(contents: &[TmpFile<String, String>]) {
-    println!("Temp dir contents:");
+    // Configure the server to serve sub pages
+    let html_doc = build_html_anchors_doc(&sub_pages);
 
-    for f in contents {
-        match f {
-            TmpFile::Dir(d) => println!("  {d}/"),
-            TmpFile::File(f, c) => println!("  {f} ({} bytes)", c.len()),
+    for page in sub_pages.iter() {
+        server.expect(
+            Expectation::matching(request::method_path("GET", format!("/root/{}/", page)))
+                .respond_with(
+                    status_code(200)
+                        .append_header("Content-Type", "text/html")
+                        .body(html_doc.clone()),
+                ),
+        );
+
+        // Serve up the file content
+        for a in sub_pages.iter() {
+            server.expect(
+                Expectation::matching(request::method_path("GET", format!("/root/{page}/{a}")))
+                    .respond_with(status_code(200).body(file_content)),
+            );
         }
     }
-}
 
-enum TmpFile<S1, S2> {
-    Dir(S1),
-    File(S1, S2),
-}
+    // Process
+    let result = super::process(args).await;
 
-async fn get_tmp_contents(tmpdir: &TempDir) -> Vec<TmpFile<String, String>> {
-    let mut contents = Vec::new();
+    // Check results
+    println!("{:?}", result);
+    assert!(matches!(result, Ok(())));
 
-    let mut process_paths = VecDeque::new();
-    process_paths.push_back(tmpdir.path().to_path_buf());
+    let mut expected_contents = vec![
+        TmpFile::File("skiplist.json".to_string(), skip_content.as_str()),
+        TmpFile::File("download/.etags.json".to_string(), "{}"),
+        TmpFile::Dir("download".to_string()),
+    ];
 
-    while let Some(d) = process_paths.pop_front() {
-        let mut paths = read_dir(&d)
-            .await
-            .expect(&format!("Failed to read directory {}", d.display()));
+    for i in sub_pages.iter() {
+        if *i > 2 {
+            expected_contents.push(TmpFile::Dir(format!("download/{i}")));
 
-        loop {
-            let dirent = paths.next_entry().await.expect(&format!(
-                "Failed to read next directory entry {}",
-                d.display()
-            ));
-            match dirent {
-                None => break,
-                Some(dirent) => {
-                    let full_path = dirent.path();
-
-                    let rel_path = full_path
-                        .strip_prefix(tmpdir.path())
-                        .expect("Failed to remove tmpdir prefix");
-
-                    let file_type = dirent.file_type().await.expect(&format!(
-                        "Error getting file type for {}",
-                        rel_path.display()
-                    ));
-
-                    let rel_name = rel_path
-                        .to_str()
-                        .expect("File name could not be converted to string")
-                        .to_string();
-
-                    if file_type.is_dir() {
-                        process_paths.push_back(full_path);
-
-                        contents.push(TmpFile::Dir(rel_name));
-                    } else {
-                        let content = read_to_string(&full_path)
-                            .await
-                            .expect(&format!("Failed to read file {}", full_path.display()));
-
-                        contents.push(TmpFile::File(rel_name, content));
-                    }
+            for j in sub_pages.iter() {
+                if *i != 3 || *j != 1 {
+                    expected_contents
+                        .push(TmpFile::File(format!("download/{i}/{j}"), file_content));
                 }
             }
         }
     }
 
-    contents
-}
-
-fn compare_tmp_contents<S1, S2, S3, S4>(
-    c1: &[TmpFile<S1, S2>],
-    c2: &[TmpFile<S3, S4>],
-    compare: bool,
-) where
-    S1: Deref<Target = str> + Display,
-    S2: Deref<Target = str> + Display,
-    S3: Deref<Target = str> + Display,
-    S4: Deref<Target = str> + Display,
-{
-    // Check the correct files exist
-    for f1 in c1 {
-        match f1 {
-            TmpFile::Dir(d1) => {
-                assert!(
-                    c2.iter()
-                        .filter_map(|d2| match d2 {
-                            TmpFile::Dir(d) => Some(d),
-                            _ => None,
-                        })
-                        .any(|d2| { d1.deref() == d2.deref() }),
-                    "Download directory contains file {d1}, which is not expected"
-                );
-            }
-            TmpFile::File(f1, cnt1) => {
-                match c2
-                    .iter()
-                    .find(|f| matches!(f, TmpFile::File(f2, _) if f1.deref() == f2.deref()))
-                {
-                    Some(TmpFile::File(f2, cnt2)) => {
-                        if compare {
-                            assert_eq!(
-                                cnt1.deref(),
-                                cnt2.deref(),
-                                "Contents of file {f2} incorrect"
-                            );
-                        }
-                    }
-                    _ => {
-                        panic!("Download directory contains file {f1}, which is not expected");
-                    }
-                }
-            }
-        }
-    }
-}
-
-async fn check_tmp_contents<S1, S2>(tmpdir: &TempDir, expected: &[TmpFile<S1, S2>])
-where
-    S1: Deref<Target = str> + Display,
-    S2: Deref<Target = str> + Display,
-{
-    let contents = get_tmp_contents(tmpdir).await;
-
-    dump_tmp_contents(&contents);
-
-    // Check the correct files exist
-    compare_tmp_contents(&contents, expected, false);
-    compare_tmp_contents(expected, &contents, true);
-}
-
-fn build_html_anchors_doc<A>(anchors: &[A]) -> String
-where
-    A: Display,
-{
-    let mut doc = String::new();
-
-    doc.push_str(
-        r#"<DOCTYPE html>
-<html>
-    <head>
-    </head>
-    <body>"#,
-    );
-
-    for a in anchors {
-        doc.push_str(&format!("        <a href=\"{a}\">Anchor: {a}</a>\n"));
-    }
-
-    doc.push_str(
-        "\
-    </body>
-</html>",
-    );
-
-    doc
-}
-
-fn generate_etags_json(etag_values: Vec<(String, String)>) -> String {
-    let mut etags = ETags::default();
-
-    for (url, etag) in etag_values.into_iter() {
-        etags.add(url, etag);
-    }
-
-    let mut bytes = Vec::new();
-
-    etags.write(&mut bytes).expect("Failed to serialise etags");
-
-    String::from_utf8(bytes).expect("Failed to convert serialised etags to string")
+    check_tmp_contents(&tmpdir, &expected_contents).await;
 }
