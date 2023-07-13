@@ -133,6 +133,37 @@ async fn test_single_file_etag() {
 }
 
 #[tokio::test]
+async fn test_single_file_no_etag() {
+    let (mut args, server, tmpdir) = test_setup("/file");
+
+    args.no_etags = true;
+
+    let file_content = "Hello, world!";
+
+    // Configure the server to expect a single GET /file request and respond with the file content.
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/file"))
+            .respond_with(status_code(200).body(file_content)),
+    );
+
+    // Process
+    let result = super::process(args).await;
+
+    // Check results
+    println!("{:?}", result);
+    assert!(matches!(result, Ok(())));
+
+    check_tmp_contents(
+        &tmpdir,
+        &[
+            TmpFile::Dir("download"),
+            TmpFile::File("download/__file.dat", file_content),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn test_single_html_empty() {
     let (args, server, tmpdir) = test_setup("/");
 
@@ -214,6 +245,91 @@ async fn test_single_html() {
             TmpFile::Dir("download"),
             TmpFile::File("download/file1", file_content),
             TmpFile::File("download/file2", file_content),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_single_xhtml() {
+    let (args, server, tmpdir) = test_setup("/root");
+
+    // Build document with some anchors
+    let html_doc = build_html_anchors_doc(&[&server.url("/root/file1").to_string()]);
+
+    let file_content = "Hello, world!";
+
+    // Configure the server to expect a single GET /root request and respond with the html document
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/root")).respond_with(
+            status_code(200)
+                .append_header("Content-Type", "application/xhtml+xml")
+                .body(html_doc),
+        ),
+    );
+
+    // Configure the server to expect a single GET /root/file1 request and respond with the file content.
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/root/file1"))
+            .respond_with(status_code(200).body(file_content)),
+    );
+
+    // Process
+    let result = super::process(args).await;
+
+    // Check results
+    println!("{:?}", result);
+    assert!(matches!(result, Ok(())));
+
+    check_tmp_contents(
+        &tmpdir,
+        &[
+            TmpFile::File("download/.etags.json", "{}"),
+            TmpFile::Dir("download"),
+            TmpFile::File("download/file1", file_content),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_single_html_duplicate() {
+    let (args, server, tmpdir) = test_setup("/root");
+
+    // Build document with some anchors
+    let html_doc =
+        build_html_anchors_doc(&["root/file1", server.url("/root/file1").to_string().as_str()]);
+
+    let file_content = "Hello, world!";
+
+    // Configure the server to expect a single GET /root request and respond with the html document
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/root")).respond_with(
+            status_code(200)
+                .append_header("Content-Type", "text/html")
+                .body(html_doc),
+        ),
+    );
+
+    // Configure the server to expect a single GET /root/file1 request and respond with the file content.
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/root/file1"))
+            .respond_with(status_code(200).body(file_content)),
+    );
+
+    // Process
+    let result = super::process(args).await;
+
+    // Check results
+    println!("{:?}", result);
+    assert!(matches!(result, Ok(())));
+
+    check_tmp_contents(
+        &tmpdir,
+        &[
+            TmpFile::File("download/.etags.json", "{}"),
+            TmpFile::Dir("download"),
+            TmpFile::File("download/file1", file_content),
         ],
     )
     .await;
