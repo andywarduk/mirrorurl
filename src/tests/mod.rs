@@ -480,3 +480,63 @@ async fn test_multi_html_skiplist() {
 
     check_tmp_contents(&tmpdir, &expected_contents).await;
 }
+
+#[tokio::test]
+async fn test_redirect() {
+    let (args, server, tmpdir) = test_setup("/root");
+
+    // Build document with some anchors
+    let html_doc = build_html_anchors_doc(&["beforefile", "extfile"]);
+
+    let file_content = "Hello, world!";
+
+    // Configure the server to expect a single GET /root request and respond with a redirect
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/root"))
+            .respond_with(status_code(301).append_header("Location", "/root/")),
+    );
+
+    // Configure the server to expect a single GET /root/ request and respond with the html document
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/root/")).respond_with(
+            status_code(200)
+                .append_header("Content-Type", "text/html")
+                .body(html_doc),
+        ),
+    );
+
+    // Configure the server to expect a single GET /root/beforefile request and respond with a relative redirect
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/root/beforefile"))
+            .respond_with(status_code(301).append_header("Location", "/root/afterfile")),
+    );
+
+    // Configure the server to expect a single GET /root/beforefile request and respond with a relative redirect
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/root/afterfile"))
+            .respond_with(status_code(200).body(file_content)),
+    );
+
+    // Configure the server to expect a single GET /root/extfile request and respond with an non-relative redirect
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/root/extfile"))
+            .respond_with(status_code(301).append_header("Location", "/other/extfile")),
+    );
+
+    // Process
+    let result = super::process(args).await;
+
+    // Check results
+    println!("{:?}", result);
+    assert!(matches!(result, Ok(())));
+
+    check_tmp_contents(
+        &tmpdir,
+        &[
+            TmpFile::File("download/.etags.json", "{}"),
+            TmpFile::Dir("download"),
+            TmpFile::File("download/afterfile", file_content),
+        ],
+    )
+    .await;
+}

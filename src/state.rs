@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::error::Error;
+use std::fmt::Display;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -170,13 +171,24 @@ impl State {
     fn create_http_client(args: &Args, url: Url) -> Result<Client, Box<dyn Error + Send + Sync>> {
         // Create redirect policy
         let redirect_policy = Policy::custom(move |attempt| {
-            let attempt_url = attempt.url();
-
             // Check no more that 10 redirects and that path is relative to the base URL
-            if attempt.previous().len() <= 10 && attempt_url.is_relative_to(&url) {
-                attempt.follow()
+            if attempt.previous().len() > 10 {
+                let initial = attempt.previous()[0].clone();
+
+                attempt.error(RedirectError(format!(
+                    "Skipping: {initial} - Too many redirects"
+                )))
             } else {
-                attempt.stop()
+                let attempt_url = attempt.url();
+
+                if !attempt_url.is_relative_to(&url) {
+                    let initial = attempt.previous()[0].clone();
+                    let attempt_url = attempt.url().clone();
+
+                    attempt.error(RedirectError(format!("Skipping: {initial} - Redirect to {attempt_url} is not relative to the base {url}")))
+                } else {
+                    attempt.follow()
+                }
             }
         });
 
@@ -190,3 +202,15 @@ impl State {
 }
 
 pub type ArcState = Arc<State>;
+
+#[derive(Debug)]
+pub struct RedirectError(String);
+
+impl Display for RedirectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)?;
+        Ok(())
+    }
+}
+
+impl Error for RedirectError {}

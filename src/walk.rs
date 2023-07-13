@@ -41,12 +41,24 @@ pub async fn walk(state: &ArcState, url: &Url) -> Result<(), Box<dyn Error + Sen
     // Fetch the URL
     output!("Fetching {url}");
 
-    let response = state
+    let response = match state
         .client()
         .get(url.clone())
         .headers(headers)
         .send()
-        .await?;
+        .await
+    {
+        Ok(response) => response,
+        Err(e) if e.is_redirect() && e.source().is_some() => {
+            // Error from the redirect policy
+            match e.source() {
+                Some(msg) => output!("{msg}"),
+                _ => Err(e)?,
+            }
+            return Ok(());
+        }
+        Err(e) => Err(e)?,
+    };
 
     // Get final URL after any redirects
     let final_url = response.url().clone();
@@ -56,13 +68,15 @@ pub async fn walk(state: &ArcState, url: &Url) -> Result<(), Box<dyn Error + Sen
 
     // Check status code
     if !status.is_success() {
-        // Not OK - check for not modified
-        if status == 304 && old_etag.is_some() {
-            output!("{url} is not modified");
-            return Ok(());
+        // Not OK - check status
+        match status.as_u16() {
+            304 if old_etag.is_some() => {
+                output!("{url} is not modified");
+            }
+            _ => Err(format!("Status {status} fetching {final_url}"))?,
         }
 
-        Err(format!("Status {status} fetching {final_url}"))?;
+        return Ok(());
     } else {
         debug!(state, 2, "Status {status}");
     }
