@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::process;
+use std::process::ExitCode;
 use std::sync::Arc;
 
 mod output;
@@ -22,18 +22,14 @@ mod response;
 mod skip;
 mod url;
 
-fn main() {
-    let exit_code = {
-        match start() {
-            Ok(_) => 0,
-            Err(e) => {
-                error!("{e}");
-                1
-            }
+fn main() -> ExitCode {
+    match start() {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(e) => {
+            error!("{e}");
+            ExitCode::FAILURE
         }
-    };
-
-    process::exit(exit_code);
+    }
 }
 
 fn start() -> Result<(), Box<dyn Error + Send + Sync>> {
