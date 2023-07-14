@@ -49,7 +49,6 @@ async fn test_single_file() {
         &tmpdir,
         &[
             TmpFile::Dir("download"),
-            TmpFile::File("download/.etags.json", "{}"),
             TmpFile::File("download/__file.dat", file_content),
         ],
     )
@@ -235,7 +234,6 @@ async fn test_single_html() {
     check_tmp_contents(
         &tmpdir,
         &[
-            TmpFile::File("download/.etags.json", "{}"),
             TmpFile::Dir("download"),
             TmpFile::File("download/file1", file_content),
             TmpFile::File("download/file2", file_content),
@@ -278,7 +276,6 @@ async fn test_single_xhtml() {
     check_tmp_contents(
         &tmpdir,
         &[
-            TmpFile::File("download/.etags.json", "{}"),
             TmpFile::Dir("download"),
             TmpFile::File("download/file1", file_content),
         ],
@@ -321,7 +318,6 @@ async fn test_single_html_duplicate() {
     check_tmp_contents(
         &tmpdir,
         &[
-            TmpFile::File("download/.etags.json", "{}"),
             TmpFile::Dir("download"),
             TmpFile::File("download/file1", file_content),
         ],
@@ -384,10 +380,7 @@ async fn test_multi_html() {
     println!("{:?}", result);
     assert!(matches!(result, Ok(())));
 
-    let mut expected_contents = vec![
-        TmpFile::File("download/.etags.json".to_string(), "{}"),
-        TmpFile::Dir("download".to_string()),
-    ];
+    let mut expected_contents = vec![TmpFile::Dir("download".to_string())];
 
     for i in sub_pages.iter() {
         expected_contents.push(TmpFile::Dir(format!("download/{i}")));
@@ -461,7 +454,6 @@ async fn test_multi_html_skiplist() {
 
     let mut expected_contents = vec![
         TmpFile::File("skiplist.json".to_string(), skip_content.as_str()),
-        TmpFile::File("download/.etags.json".to_string(), "{}"),
         TmpFile::Dir("download".to_string()),
     ];
 
@@ -533,7 +525,6 @@ async fn test_redirect() {
     check_tmp_contents(
         &tmpdir,
         &[
-            TmpFile::File("download/.etags.json", "{}"),
             TmpFile::Dir("download"),
             TmpFile::File("download/afterfile", file_content),
         ],

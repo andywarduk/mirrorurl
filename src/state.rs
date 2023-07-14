@@ -142,12 +142,14 @@ impl State {
     /// Save the etags file
     pub async fn save_etags(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
         if !self.args.no_etags {
-            // Save etags
-            self.new_etags
-                .lock()
-                .await
-                .extend(&self.old_etags)
-                .save_to_file(&self.etags_file)?
+            let new_etags = &mut self.new_etags.lock().await;
+
+            if !new_etags.is_empty() {
+                // Merge old etags in to new etags and save to file
+                new_etags
+                    .extend(&self.old_etags)
+                    .save_to_file(&self.etags_file)?
+            }
         }
 
         Ok(())

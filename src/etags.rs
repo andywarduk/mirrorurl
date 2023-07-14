@@ -81,4 +81,9 @@ impl ETags {
 
         self
     }
+
+    /// Returns true if the collection is empty
+    pub fn is_empty(&self) -> bool {
+        self.etags.is_empty()
+    }
 }
