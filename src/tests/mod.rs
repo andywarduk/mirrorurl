@@ -183,6 +183,37 @@ async fn test_single_html_empty() {
 }
 
 #[tokio::test]
+async fn test_single_html_404() {
+    let (args, server, tmpdir) = test_setup("/");
+
+    // Build document single anchor
+    let html_doc = build_html_anchors_doc(&["file"]);
+
+    // Configure the server to expect a single GET / request and respond with the html document.
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/")).respond_with(
+            status_code(200)
+                .append_header("Content-Type", "text/html")
+                .body(html_doc),
+        ),
+    );
+
+    // Configure the server to expect a single GET /file request and respond with 404.
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/file")).respond_with(status_code(404)),
+    );
+
+    // Process
+    let result = super::process(args).await;
+
+    // Check results
+    println!("{:?}", result);
+    assert!(matches!(result, Ok(())));
+
+    check_tmp_contents(&tmpdir, &[] as &[TmpFile<&str, &str>; 0]).await;
+}
+
+#[tokio::test]
 async fn test_single_html() {
     let (args, server, tmpdir) = test_setup("/root");
 
@@ -327,7 +358,8 @@ async fn test_single_html_duplicate() {
 
 #[tokio::test]
 async fn test_multi_html() {
-    let (args, server, tmpdir) = test_setup("/root/");
+    let (mut args, server, tmpdir) = test_setup("/root/");
+    args.debug = 0;
 
     // File content
     let file_content = "Hello, world!";

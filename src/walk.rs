@@ -14,7 +14,7 @@ use crate::url::Url;
 pub async fn walk(state: &ArcState, url: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
     // Already seen this URL?
     if !state.add_processed_url(url.clone()).await {
-        debug!(state, 1, "Skipping {url} as it's already been processed");
+        debug!(state, 1, "URL {url} has already been processed");
         return Ok(());
     };
 

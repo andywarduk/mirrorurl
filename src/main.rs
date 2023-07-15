@@ -20,6 +20,7 @@ mod html;
 mod mime;
 mod response;
 mod skip;
+mod skipreason;
 mod url;
 
 fn main() -> ExitCode {

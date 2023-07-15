@@ -13,6 +13,7 @@ use crate::args::Args;
 use crate::etags::ETags;
 use crate::output::debug;
 use crate::skip::SkipList;
+use crate::skipreason::{SkipReason, SkipReasonErr};
 use crate::url::{Url, UrlExt};
 
 /// Program state shared between all threads
@@ -95,14 +96,15 @@ impl State {
     }
 
     /// Build file relative path for a given URL
-    pub fn path_for_url(&self, url: &Url) -> Result<PathBuf, String> {
+    pub fn path_for_url(&self, url: &Url) -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
         // Start with download directory
         let mut path = PathBuf::from(&self.args.target);
 
         // Get relative path of the URL from the base
-        let rel = url
-            .relative_path(&self.url)
-            .ok_or("URL is not relative to the base URL".to_string())?;
+        let rel = match url.relative_path(&self.url) {
+            Some(rel) => rel,
+            None => Err(SkipReasonErr::new(url.to_string(), SkipReason::NotRelative))?,
+        };
 
         if rel.is_empty() {
             // Not relative - use the unnamed file name
@@ -110,7 +112,7 @@ impl State {
         } else {
             // Is it in the skip list?
             if self.skip_list.find(rel) {
-                Err("Path is in the skip list")?
+                Err(SkipReasonErr::new(url.to_string(), SkipReason::SkipList))?
             }
 
             // Use relative path
@@ -177,9 +179,11 @@ impl State {
             if attempt.previous().len() > 10 {
                 let initial = attempt.previous()[0].clone();
 
-                attempt.error(RedirectError(format!(
-                    "Skipping: {initial} - Too many redirects"
-                )))
+                // TODO
+                attempt.error(SkipReasonErr::new(
+                    initial.to_string(),
+                    SkipReason::TooManyRedirects,
+                ))
             } else {
                 let attempt_url = attempt.url();
 
@@ -187,7 +191,10 @@ impl State {
                     let initial = attempt.previous()[0].clone();
                     let attempt_url = attempt.url().clone();
 
-                    attempt.error(RedirectError(format!("Skipping: {initial} - Redirect to {attempt_url} is not relative to the base {url}")))
+                    attempt.error(SkipReasonErr::new(
+                        initial.to_string(),
+                        SkipReason::RedirectNotRel(attempt_url.to_string()),
+                    ))
                 } else {
                     attempt.follow()
                 }

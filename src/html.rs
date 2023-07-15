@@ -5,7 +5,8 @@ use scraper::{Html, Selector};
 use tokio::spawn;
 use tokio::task::JoinHandle;
 
-use crate::output::debug;
+use crate::output::{debug, output};
+use crate::skipreason::{SkipReason, SkipReasonErr};
 use crate::state::ArcState;
 use crate::url::{Url, UrlExt};
 use crate::walk::walk;
@@ -24,8 +25,9 @@ pub fn process_html(
 
     // Process each href
     for href in hrefs {
-        if let Some(join) = process_href(state, url, &href) {
-            join_handles.push(join);
+        match process_href(state, url, &href) {
+            Err(e) => output!("{e}"),
+            Ok(join) => join_handles.push(join),
         }
     }
 
@@ -59,52 +61,51 @@ fn parse_html(state: &ArcState, html: String) -> Vec<String> {
         .collect::<Vec<_>>()
 }
 
+type ThreadResult = Result<(), Box<dyn Error + Send + Sync>>;
+
 /// Process a href on a base URL
 fn process_href(
     state: &ArcState,
     base_url: &Url,
     href: &str,
-) -> Option<JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>> {
+) -> Result<JoinHandle<ThreadResult>, SkipReasonErr> {
     // Join href to the base URL if necessary
     match base_url.join(href) {
         Ok(href_url) => {
             debug!(state, 2, "href {href} of {base_url} -> {href_url}");
 
-            if let Err(e) = href_url.is_handled() {
-                debug!(state, 1, "Skipping: {e}");
-                return None;
-            }
+            href_url.is_handled()?;
 
             // Check it's not a fragment
             if href_url.fragment().is_some() {
-                debug!(state, 1, "Skipping: {href_url} is a fragment");
-                return None;
+                Err(SkipReasonErr::new(
+                    href_url.to_string(),
+                    SkipReason::Fragment,
+                ))?;
             }
 
             // Check is doesn't have a query string
             if href_url.query().is_some() {
-                debug!(state, 1, "Skipping: {href_url} has a query string");
-                return None;
+                Err(SkipReasonErr::new(href_url.to_string(), SkipReason::Query))?;
             }
 
             // Check the URL is relative to the base URL
             if !href_url.is_relative_to(state.url()) {
-                debug!(
-                    state,
-                    1, "Skipping: {href_url} is not relative to the base {base_url}"
-                );
-                return None;
+                Err(SkipReasonErr::new(
+                    href_url.to_string(),
+                    SkipReason::NotRelative,
+                ))?;
             }
 
             // Clone state
             let state = state.clone();
 
             // Spawn a task to process the url
-            Some(spawn(async move { walk(&state, &href_url).await }))
+            Ok(spawn(async move { walk(&state, &href_url).await }))
         }
-        Err(e) => {
-            debug!(state, 1, "href {href} is not valid ({e})");
-            None
-        }
+        Err(e) => Err(SkipReasonErr::new(
+            href.to_string(),
+            SkipReason::NotValid(e),
+        )),
     }
 }

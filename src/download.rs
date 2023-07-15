@@ -7,6 +7,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::output::{debug, error, output};
 use crate::response::Response;
+use crate::skipreason::SkipReasonErr;
 use crate::url::Url;
 use crate::ArcState;
 
@@ -20,7 +21,8 @@ pub async fn download(
     // Build full download path
     match state.path_for_url(final_url) {
         Ok(path) => download_to_path(state, final_url, &mut response, path).await?,
-        Err(e) => debug!(state, 1, "Skipping: {e}"),
+        Err(e) if e.is::<SkipReasonErr>() => output!("{e}"),
+        Err(e) => error!("{e}"),
     }
 
     // Get response etag

@@ -1,9 +1,11 @@
 use url::Position;
 pub use url::Url;
 
+use crate::skipreason::{SkipReason, SkipReasonErr};
+
 pub trait UrlExt {
     /// Returns true if the URL can be handled
-    fn is_handled(&self) -> Result<(), String>;
+    fn is_handled(&self) -> Result<(), SkipReasonErr>;
 
     /// Returns true if test URL is relative to a base URL
     fn is_relative_to(&self, base_url: &Url) -> bool;
@@ -17,12 +19,15 @@ pub trait UrlExt {
 
 impl UrlExt for Url {
     /// Checks the passed URL can be handled
-    fn is_handled(&self) -> Result<(), String> {
+    fn is_handled(&self) -> Result<(), SkipReasonErr> {
         // Check scheme
         match self.scheme() {
             "http" | "https" => (),
             _ => {
-                Err(format!("{self} is not an http or https scheme"))?;
+                return Err(SkipReasonErr::new(
+                    self.to_string().clone(),
+                    SkipReason::Transport,
+                ))
             }
         }
 
