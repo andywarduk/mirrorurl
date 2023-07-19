@@ -42,6 +42,10 @@ pub struct Args {
     #[clap(short = 'e', long = "no-etags")]
     pub no_etags: bool,
 
+    /// Maximum number of redirects
+    #[clap(short = 'r', long = "max-redirects", default_value_t = default_max_redirects())]
+    pub max_redirects: usize,
+
     /// Increase debug message level
     #[clap(short = 'd', long = "debug", action = clap::ArgAction::Count)]
     pub debug: u8,
@@ -63,6 +67,7 @@ impl Default for Args {
             fetch_timeout: default_fetch_timeout(),
             skip_file: Default::default(),
             no_etags: Default::default(),
+            max_redirects: default_max_redirects(),
             debug: Default::default(),
             debug_delay: Default::default(),
         }
@@ -118,4 +123,8 @@ fn clamp_threads(s: &str) -> Result<usize, String> {
     }
 
     Ok(act_threads)
+}
+
+fn default_max_redirects() -> usize {
+    10
 }

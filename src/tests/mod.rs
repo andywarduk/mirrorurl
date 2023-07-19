@@ -920,7 +920,7 @@ async fn test_too_many_redirects() {
             .respond_with(status_code(301).append_header("Location", "/root/1")),
     );
 
-    for i in 1..=10 {
+    for i in 1..=args.max_redirects {
         server.expect(
             Expectation::matching(request::method_path("GET", format!("/root/{}", i)))
                 .respond_with(

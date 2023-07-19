@@ -202,9 +202,11 @@ impl State {
     /// Creates the HTTP client
     fn create_http_client(args: &Args, url: Url) -> Result<Client, Box<dyn Error + Send + Sync>> {
         // Create redirect policy
+        let max_redirects = args.max_redirects;
+
         let redirect_policy = Policy::custom(move |attempt| {
             // Check no more that 10 redirects and that path is relative to the base URL
-            if attempt.previous().len() > 10 {
+            if attempt.previous().len() > max_redirects {
                 let initial = attempt.previous()[0].clone();
 
                 attempt.error(SkipReasonErr::new(
