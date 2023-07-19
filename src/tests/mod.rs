@@ -909,3 +909,49 @@ async fn test_redirect() {
     )
     .await;
 }
+
+#[tokio::test]
+async fn test_too_many_redirects() {
+    let (args, mut server, tmpdir) = test_setup("/root");
+
+    // Configure the server to expect a single GET /root request and respond with a redirect
+    server.expect(
+        Expectation::matching(request::method_path("GET", "/root"))
+            .respond_with(status_code(301).append_header("Location", "/root/1")),
+    );
+
+    for i in 1..=10 {
+        server.expect(
+            Expectation::matching(request::method_path("GET", format!("/root/{}", i)))
+                .respond_with(
+                    status_code(301).append_header("Location", format!("/root/{}", i + 1)),
+                ),
+        );
+    }
+
+    // Build expected stats
+    let mut expected_stats = Stats::default();
+    expected_stats.add_skipped();
+
+    // Build expected messages
+    let expected_messages = [
+        format!("INFO: Fetching {}", server.url("/root")),
+        format!("INFO: Skipping {}: Too many redirects", server.url("/root")),
+        "INFO: 0 documents parsed (0 bytes)".to_string(),
+        "INFO: 0 files downloaded (0 bytes), 0 not modified, 1 skipped, 0 errored".to_string(),
+    ];
+
+    // Process
+    let result = async_main(args).await;
+
+    // Check results
+    check_results(
+        result,
+        Ok(expected_stats),
+        &expected_messages,
+        &mut server,
+        &tmpdir,
+        &[] as &[TmpFile<&str, &str>; 0],
+    )
+    .await;
+}

@@ -1,8 +1,9 @@
 use std::error::Error;
-use std::path::PathBuf;
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 
 use reqwest::header::ETAG;
-use tokio::fs::{create_dir_all, File};
+use tokio::fs::{create_dir_all, remove_file, rename, File};
 use tokio::io::AsyncWriteExt;
 
 use crate::output::{debug, error, output};
@@ -20,8 +21,35 @@ pub async fn download(
     // Build full download path
     let path = state.path_for_url(final_url).await?;
 
-    // Download to file
-    let bytes = download_to_path(state, final_url, &mut response, path).await?;
+    // Build temp file name
+    let mut tmp_file_name = match path.file_name() {
+        Some(name) => OsString::from(name),
+        None => OsString::from("tmp"),
+    };
+    tmp_file_name.push(OsString::from(".mirrorurl"));
+
+    // Build temp path
+    let tmp_path = path.with_file_name(tmp_file_name);
+
+    // Download to temp file
+    let bytes = match download_to_path(state, final_url, &mut response, &path, &tmp_path).await {
+        Ok(bytes) => {
+            // Try and rename the file
+            match rename(&tmp_path, path).await {
+                Ok(_) => bytes,
+                Err(e) => {
+                    // Failed - try and remove temp file
+                    let _ = remove_file(&tmp_path).await;
+                    Err(e)?
+                }
+            }
+        }
+        Err(e) => {
+            // Failed - try and remove temp file
+            let _ = remove_file(&tmp_path).await;
+            Err(e)?
+        }
+    };
 
     // Get response etag
     match response.headers().get(ETAG).map(|value| value.to_str()) {
@@ -47,14 +75,15 @@ pub async fn download_to_path(
     state: &ArcState,
     final_url: &Url,
     response: &mut Response,
-    path: PathBuf,
+    final_path: &Path,
+    tmp_path: &PathBuf,
 ) -> Result<usize, Box<dyn Error + Send + Sync>> {
     // Create directories if necessary
-    if let Some(parent) = path.parent() {
+    if let Some(parent) = tmp_path.parent() {
         if !parent.is_dir() {
             create_dir_all(parent)
                 .await
-                .map_err(|e| format!("Unable to create directory {}: {e}", path.display()))?;
+                .map_err(|e| format!("Unable to create directory {}: {e}", parent.display()))?;
         }
     }
 
@@ -66,13 +95,13 @@ pub async fn download_to_path(
 
     output!(
         "Downloading {final_url} to {} (size {size})",
-        path.display()
+        final_path.display()
     );
 
     // Open the file
-    let mut file = File::create(&path)
+    let mut file = File::create(&tmp_path)
         .await
-        .map_err(|e| format!("Unable to create file {}: {e}", path.display()))?;
+        .map_err(|e| format!("Unable to create file {}: {e}", tmp_path.display()))?;
 
     // Debug delay
     state.debug_delay().await;
@@ -91,7 +120,7 @@ pub async fn download_to_path(
         // Write chunk to the file
         file.write_all(&chunk)
             .await
-            .map_err(|e| format!("Error writing to {}: {e}", path.display()))?;
+            .map_err(|e| format!("Error writing to {}: {e}", tmp_path.display()))?;
 
         // Debug delay
         state.debug_delay().await;
