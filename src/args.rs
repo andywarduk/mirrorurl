@@ -70,6 +70,7 @@ impl Default for Args {
 }
 
 impl Args {
+    /// Parse command line arguments and return an error on failure
     pub fn parse() -> Result<Self, Box<dyn Error + Send + Sync>> {
         let args = Args::try_parse()?;
 

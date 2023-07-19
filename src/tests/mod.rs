@@ -5,7 +5,7 @@ use httptest::Expectation;
 mod helpers;
 use helpers::*;
 
-use super::process;
+use super::async_main;
 use crate::stats::Stats;
 
 #[tokio::test]
@@ -30,7 +30,7 @@ async fn test_404() {
     ];
 
     // Process
-    let result = process(args).await;
+    let result = async_main(args).await;
 
     // Check results
     check_results(
@@ -77,7 +77,7 @@ async fn test_single_file() {
     ];
 
     // Process
-    let result = process(args).await;
+    let result = async_main(args).await;
 
     // Check results
     check_results(
@@ -143,7 +143,7 @@ async fn test_single_file_etag() {
     ];
 
     // Process
-    let result = process(args.clone()).await;
+    let result = async_main(args.clone()).await;
 
     // Check results
     check_results(
@@ -184,7 +184,7 @@ async fn test_single_file_etag() {
     ];
 
     // Process
-    let result = process(args).await;
+    let result = async_main(args).await;
 
     // Check results
     check_results(
@@ -237,7 +237,7 @@ async fn test_single_file_no_etag() {
     ];
 
     // Process
-    let result = process(args).await;
+    let result = async_main(args).await;
 
     // Check results
     check_results(
@@ -282,7 +282,7 @@ async fn test_single_html_empty() {
     ];
 
     // Process
-    let result = process(args).await;
+    let result = async_main(args).await;
 
     // Check results
     check_results(
@@ -335,7 +335,7 @@ async fn test_single_html_404() {
     ];
 
     // Process
-    let result = process(args).await;
+    let result = async_main(args).await;
 
     // Check results
     check_results(
@@ -448,7 +448,7 @@ async fn test_single_html() {
     ];
 
     // Process
-    let result = process(args).await;
+    let result = async_main(args).await;
 
     // Check results
     check_results(
@@ -513,7 +513,7 @@ async fn test_single_xhtml() {
     ];
 
     // Process
-    let result = process(args).await;
+    let result = async_main(args).await;
 
     // Check results
     check_results(
@@ -578,7 +578,7 @@ async fn test_single_html_duplicate() {
     ];
 
     // Process
-    let result = process(args).await;
+    let result = async_main(args).await;
 
     // Check results
     check_results(
@@ -683,7 +683,7 @@ async fn test_multi_html() {
     ));
 
     // Process
-    let result = process(args).await;
+    let result = async_main(args).await;
 
     // Check results
     check_results(
@@ -807,7 +807,7 @@ async fn test_multi_html_skiplist() {
     ));
 
     // Process
-    let result = process(args).await;
+    let result = async_main(args).await;
 
     // Check results
     check_results(
@@ -893,7 +893,7 @@ async fn test_redirect() {
     ];
 
     // Process
-    let result = process(args).await;
+    let result = async_main(args).await;
 
     // Check results
     check_results(

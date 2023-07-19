@@ -31,9 +31,11 @@ pub async fn download(
             state.add_etags(vec![url, final_url], etag).await;
         }
         Some(_) => {
+            // Etag is invalid
             error!("Invalid etag header received from {url}");
         }
         None => {
+            // No etag received
             debug!(state, 1, "No etag header received");
         }
     }

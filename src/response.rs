@@ -6,16 +6,21 @@ use crate::mime::{Mime, MimeExt};
 use crate::output::debug;
 use crate::state::ArcState;
 
+/// Extension trait for a reqwest Response
 pub trait ResponseExt {
     fn is_html(&self, state: &ArcState) -> bool;
 }
 
+/// HMTL MIME type
 static MIME_HTML: Lazy<Mime> = Lazy::new(|| "text/html".parse::<Mime>().unwrap());
+
+/// XHTML MIME type
 static MIME_XHTML: Lazy<Mime> = Lazy::new(|| "application/xhtml+xml".parse::<Mime>().unwrap());
 
 impl ResponseExt for Response {
+    /// Returns true if the response can be parsed as HTML
     fn is_html(&self, state: &ArcState) -> bool {
-        // Get content type
+        // Get content MIME type
         if let Some(mime_type) = self
             .headers()
             .get(CONTENT_TYPE)

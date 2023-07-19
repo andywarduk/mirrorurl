@@ -3,6 +3,7 @@ pub use url::Url;
 
 use crate::skipreason::{SkipReason, SkipReasonErr};
 
+/// Extension trait for Url
 pub trait UrlExt {
     /// Returns true if the URL can be handled
     fn is_handled(&self) -> Result<(), SkipReasonErr>;
@@ -34,10 +35,12 @@ impl UrlExt for Url {
         Ok(())
     }
 
+    /// Checks a URL is relative to this one
     fn is_relative_to(&self, base_url: &Url) -> bool {
         self.relative_path(base_url).is_some()
     }
 
+    /// Returns the base URL relative path
     fn relative_path<'a>(&'a self, base_url: &Url) -> Option<&'a str> {
         let base_path = base_url.full_path();
 
@@ -56,6 +59,7 @@ impl UrlExt for Url {
         None
     }
 
+    /// Returns the full path of the URL
     fn full_path(&self) -> &str {
         &self[Position::BeforePath..]
     }

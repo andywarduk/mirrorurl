@@ -2,8 +2,6 @@ use std::error::Error;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use lazy_static::lazy_static;
-
 mod output;
 
 mod args;
@@ -11,6 +9,7 @@ use args::Args;
 
 mod state;
 use log::LevelFilter;
+use once_cell::sync::Lazy;
 use output::Logger;
 use state::{ArcState, State};
 
@@ -30,17 +29,18 @@ mod skipreason;
 mod stats;
 mod url;
 
-lazy_static! {
-    /// Global logger
-    static ref LOGGER: Logger = Logger::new();
-}
+#[cfg(test)]
+mod tests;
 
+static LOGGER: Lazy<Logger> = Lazy::new(Logger::new);
+
+/// Program entry point
 fn main() -> ExitCode {
     // Set up logger
     log::set_logger(&*LOGGER).expect("Failed to set logger");
     log::set_max_level(LevelFilter::Info);
 
-    match start() {
+    match start_async() {
         Ok(_) => ExitCode::SUCCESS,
         Err(e) => {
             error!("{e}");
@@ -49,7 +49,8 @@ fn main() -> ExitCode {
     }
 }
 
-fn start() -> Result<(), Box<dyn Error + Send + Sync>> {
+/// Parse command line args, start tokio and run
+fn start_async() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Parse command line arguments
     let args = Args::parse()?;
 
@@ -70,12 +71,13 @@ fn start() -> Result<(), Box<dyn Error + Send + Sync>> {
         .build()?;
 
     // Start tokio runtime and call the main function
-    runtime.block_on(async { process(args).await })?;
+    runtime.block_on(async { async_main(args).await })?;
 
     Ok(())
 }
 
-async fn process(args: Args) -> Result<Stats, Box<dyn Error + Send + Sync>> {
+/// Async entry point
+async fn async_main(args: Args) -> Result<Stats, Box<dyn Error + Send + Sync>> {
     // Create shared state
     let state = Arc::new(State::new(args)?);
 
@@ -91,6 +93,3 @@ async fn process(args: Args) -> Result<Stats, Box<dyn Error + Send + Sync>> {
 
     Ok(stats)
 }
-
-#[cfg(test)]
-mod tests;

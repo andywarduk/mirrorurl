@@ -3,26 +3,7 @@ use std::fmt::Display;
 
 use url::ParseError;
 
-#[derive(Debug)]
-pub struct SkipReasonErr {
-    url: String,
-    reason: SkipReason,
-}
-
-impl SkipReasonErr {
-    pub fn new(url: String, reason: SkipReason) -> Self {
-        Self { url, reason }
-    }
-}
-
-impl Display for SkipReasonErr {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Skipping {}: {}", self.url, self.reason)
-    }
-}
-
-impl Error for SkipReasonErr {}
-
+/// Reason for skipping a file
 #[derive(Debug)]
 pub enum SkipReason {
     Transport,
@@ -50,3 +31,27 @@ impl Display for SkipReason {
         }
     }
 }
+
+/// Error encapsulation a skipped file reason
+#[derive(Debug)]
+pub struct SkipReasonErr {
+    /// The skipped URL
+    url: String,
+    /// Reason for skipping
+    reason: SkipReason,
+}
+
+impl SkipReasonErr {
+    /// Creates a new skip reason error
+    pub fn new(url: String, reason: SkipReason) -> Self {
+        Self { url, reason }
+    }
+}
+
+impl Display for SkipReasonErr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Skipping {}: {}", self.url, self.reason)
+    }
+}
+
+impl Error for SkipReasonErr {}

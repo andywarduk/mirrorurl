@@ -10,9 +10,7 @@ use crate::skipreason::SkipReasonErr;
 use crate::state::ArcState;
 use crate::url::Url;
 
-/// Loads data from a URL. If the data is HTML, parse the document and follow links.
-/// Otherwise download the file.
-/// Use loaded etags to determine if the resource has already been downloaded and skip if so.
+/// Handle errors and update stats wrapper for walk_internal
 pub async fn walk(state: &ArcState, url: &Url) {
     match walk_internal(state, url).await {
         Ok(()) => {}
@@ -32,17 +30,17 @@ pub async fn walk(state: &ArcState, url: &Url) {
     }
 }
 
-pub async fn walk_internal(
-    state: &ArcState,
-    url: &Url,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+/// Loads data from a URL. If the data is HTML, parse the document and follow links.
+/// Otherwise download the file.
+/// Use loaded etags to determine if the resource has already been downloaded and skip if so.
+async fn walk_internal(state: &ArcState, url: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
     // Already seen this URL?
     if !state.add_processed_url(url.clone()).await {
         debug!(state, 1, "URL {url} has already been processed");
         return Ok(());
     };
 
-    // Check path
+    // Check URL maps to a path
     let _ = state.path_for_url(url).await?;
 
     // Create additional HTTP headers

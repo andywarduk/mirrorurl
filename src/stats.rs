@@ -14,28 +14,34 @@ pub struct Stats {
 }
 
 impl Stats {
+    /// Add a download to the stats
     pub fn add_download(&mut self, bytes: usize) {
         self.downloads += 1;
         self.download_bytes += bytes;
     }
 
+    /// Add an HTML document download to the stats
     pub fn add_html(&mut self, bytes: usize) {
         self.html_docs += 1;
         self.html_bytes += bytes;
     }
 
+    /// Add a skipped file to the stats
     pub fn add_skipped(&mut self) {
         self.skipped += 1;
     }
 
+    /// Add a not modified file to the stats
     pub fn add_not_modified(&mut self) {
         self.not_modified += 1;
     }
 
+    /// Add an errored file to the stats
     pub fn add_errored(&mut self) {
         self.errored += 1;
     }
 
+    /// Prints the stats
     pub fn print(&self) {
         output!(
             "{} parsed ({})",
@@ -52,6 +58,7 @@ impl Stats {
         );
     }
 
+    /// Formats a quantity + unit
     fn format_qty<T>(qty: T, single: &str, plural: &str) -> String
     where
         T: PrimInt + std::fmt::Display,

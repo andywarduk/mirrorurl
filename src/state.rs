@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::error::Error;
-use std::fmt::Display;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -19,15 +18,25 @@ use crate::url::{Url, UrlExt};
 
 /// Program state shared between all threads
 pub struct State {
+    /// Base URL
     url: Url,
+    /// Set of processed URLs
     processed_urls: Mutex<HashSet<Url>>,
+    /// Etags file path as a string
     etags_file: String,
+    /// Old etags collection (loaded at startup)
     old_etags: ETags,
+    /// New etags collection (added to whilst running)
     new_etags: Mutex<ETags>,
+    /// File skip list
     skip_list: SkipList,
+    /// Concurrect fetch semaphore
     conc_sem: Semaphore,
+    /// HTTP client
     client: Client,
+    /// Command line arguments
     args: Args,
+    /// Statistics
     stats: Mutex<Stats>,
 }
 
@@ -190,6 +199,7 @@ impl State {
         }
     }
 
+    /// Creates the HTTP client
     fn create_http_client(args: &Args, url: Url) -> Result<Client, Box<dyn Error + Send + Sync>> {
         // Create redirect policy
         let redirect_policy = Policy::custom(move |attempt| {
@@ -228,15 +238,3 @@ impl State {
 }
 
 pub type ArcState = Arc<State>;
-
-#[derive(Debug)]
-pub struct RedirectError(String);
-
-impl Display for RedirectError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)?;
-        Ok(())
-    }
-}
-
-impl Error for RedirectError {}

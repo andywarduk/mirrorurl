@@ -53,6 +53,7 @@ impl ETags {
         Ok(())
     }
 
+    /// Serialises the etags map to JSON and writes to a writer
     pub fn write<W>(&self, writer: W) -> Result<(), Box<dyn Error + Send + Sync>>
     where
         W: Write,

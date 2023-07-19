@@ -30,7 +30,7 @@ macro_rules! debug {
 
 pub(crate) use {debug, error, output};
 
-#[derive(Debug)]
+/// Global logger structure
 pub struct Logger {
     all_targets: AtomicBool,
     #[cfg(test)]
