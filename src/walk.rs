@@ -6,17 +6,44 @@ use crate::download::download;
 use crate::html::process_html;
 use crate::output::{debug, error, output};
 use crate::response::ResponseExt;
+use crate::skipreason::SkipReasonErr;
 use crate::state::ArcState;
 use crate::url::Url;
 
 /// Loads data from a URL. If the data is HTML, parse the document and follow links.
+/// Otherwise download the file.
 /// Use loaded etags to determine if the resource has already been downloaded and skip if so.
-pub async fn walk(state: &ArcState, url: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
+pub async fn walk(state: &ArcState, url: &Url) {
+    match walk_internal(state, url).await {
+        Ok(()) => {}
+        Err(e) if e.is::<SkipReasonErr>() => {
+            output!("{e}");
+            state.update_stats(|mut stats| stats.add_skipped()).await;
+        }
+        Err(e) if matches!(e.source(), Some(e) if e.is::<SkipReasonErr>()) => {
+            // Error from the redirect policy
+            output!("{}", e.source().unwrap());
+            state.update_stats(|mut stats| stats.add_skipped()).await;
+        }
+        Err(e) => {
+            error!("{e}");
+            state.update_stats(|mut stats| stats.add_errored()).await;
+        }
+    }
+}
+
+pub async fn walk_internal(
+    state: &ArcState,
+    url: &Url,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     // Already seen this URL?
     if !state.add_processed_url(url.clone()).await {
         debug!(state, 1, "URL {url} has already been processed");
         return Ok(());
     };
+
+    // Check path
+    let _ = state.path_for_url(url).await?;
 
     // Create additional HTTP headers
     let mut headers = HeaderMap::new();
@@ -41,24 +68,12 @@ pub async fn walk(state: &ArcState, url: &Url) -> Result<(), Box<dyn Error + Sen
     // Fetch the URL
     output!("Fetching {url}");
 
-    let response = match state
+    let response = state
         .client()
         .get(url.clone())
         .headers(headers)
         .send()
-        .await
-    {
-        Ok(response) => response,
-        Err(e) if e.is_redirect() && e.source().is_some() => {
-            // Error from the redirect policy
-            match e.source() {
-                Some(msg) => output!("{msg}"),
-                _ => Err(e)?,
-            }
-            return Ok(());
-        }
-        Err(e) => Err(e)?,
-    };
+        .await?;
 
     // Get final URL after any redirects
     let final_url = response.url().clone();
@@ -71,6 +86,9 @@ pub async fn walk(state: &ArcState, url: &Url) -> Result<(), Box<dyn Error + Sen
         // Not OK - check status
         match status.as_u16() {
             304 if old_etag.is_some() => {
+                state
+                    .update_stats(|mut stats| stats.add_not_modified())
+                    .await;
                 output!("{url} is not modified");
             }
             _ => Err(format!("Status {status} fetching {final_url}"))?,
@@ -89,28 +107,35 @@ pub async fn walk(state: &ArcState, url: &Url) -> Result<(), Box<dyn Error + Sen
         // Release the download slot
         drop(sem);
 
+        // Add html stats
+        let html_bytes = html.len();
+        state
+            .update_stats(|mut stats| stats.add_html(html_bytes))
+            .await;
+
         // Process HTML
-        let join_handles = process_html(state, &final_url, html);
+        let join_handles = process_html(state, &final_url, html).await;
 
         // Join the threads
         for j in join_handles {
             match j.await {
-                Ok(res) => {
-                    if let Err(e) = res {
-                        error!("{}", e.to_string());
-                    }
-                }
+                Ok(()) => {}
                 Err(e) => {
-                    error!("{}", e.to_string());
+                    error!("Failed to join thread: {e}");
                 }
             }
         }
     } else {
         // Download the resource
-        download(state, url, &final_url, response).await?;
+        let bytes = download(state, url, &final_url, response).await?;
 
         // Release the download slot
         drop(sem);
+
+        // Add download stats
+        state
+            .update_stats(|mut stats| stats.add_download(bytes))
+            .await;
     }
 
     Ok(())

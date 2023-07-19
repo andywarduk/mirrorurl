@@ -1,5 +1,3 @@
-use std::error::Error;
-
 use once_cell::sync::Lazy;
 use scraper::{Html, Selector};
 use tokio::spawn;
@@ -12,21 +10,20 @@ use crate::url::{Url, UrlExt};
 use crate::walk::walk;
 
 /// Process all of the links in an HTML document returning a list of join handles for spawned download tasks
-pub fn process_html(
-    state: &ArcState,
-    url: &Url,
-    html: String,
-) -> Vec<JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>> {
+pub async fn process_html(state: &ArcState, url: &Url, html: String) -> Vec<JoinHandle<()>> {
     // Process all of the links
     let mut join_handles = Vec::new();
 
     // Get hrefs out of the document
-    let hrefs = parse_html(state, html);
+    let hrefs = parse_html(html);
 
     // Process each href
     for href in hrefs {
         match process_href(state, url, &href) {
-            Err(e) => output!("{e}"),
+            Err(e) => {
+                state.update_stats(|mut stats| stats.add_skipped()).await;
+                output!("{e}")
+            }
             Ok(join) => join_handles.push(join),
         }
     }
@@ -35,10 +32,10 @@ pub fn process_html(
 }
 
 /// Anchor selector
-static ANCHOR_SEL: Lazy<Selector> = Lazy::new(|| Selector::parse("a").unwrap());
+static ANCHOR_SEL: Lazy<Selector> = Lazy::new(|| Selector::parse("a[href]").unwrap());
 
 /// Parse an HTML document and return a list of href links to process
-fn parse_html(state: &ArcState, html: String) -> Vec<String> {
+fn parse_html(html: String) -> Vec<String> {
     // Parse the document
     let document = Html::parse_document(&html);
 
@@ -48,27 +45,17 @@ fn parse_html(state: &ArcState, html: String) -> Vec<String> {
     // Get all hrefs
     anchors
         .into_iter()
-        .filter_map(|a| {
-            let r = a.value().attr("href");
-
-            if r.is_none() {
-                debug!(state, 1, "Skipping anchor as it has no href ({})", a.html());
-            }
-
-            r
-        })
+        .filter_map(|a| a.value().attr("href"))
         .map(|a| a.to_string())
-        .collect::<Vec<_>>()
+        .collect()
 }
-
-type ThreadResult = Result<(), Box<dyn Error + Send + Sync>>;
 
 /// Process a href on a base URL
 fn process_href(
     state: &ArcState,
     base_url: &Url,
     href: &str,
-) -> Result<JoinHandle<ThreadResult>, SkipReasonErr> {
+) -> Result<JoinHandle<()>, SkipReasonErr> {
     // Join href to the base URL if necessary
     match base_url.join(href) {
         Ok(href_url) => {

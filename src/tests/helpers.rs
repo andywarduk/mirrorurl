@@ -1,19 +1,26 @@
 // Helper functions
 
 use std::collections::VecDeque;
+use std::error::Error;
 use std::fmt::Display;
 use std::ops::Deref;
 use std::path::PathBuf;
 
 use httptest::Server;
+use log::LevelFilter;
 use tempdir::TempDir;
 use tokio::fs::{read_dir, read_to_string, File};
 use tokio::io::AsyncWriteExt;
 
 use crate::args::Args;
 use crate::etags::ETags;
+use crate::stats::Stats;
+use crate::LOGGER;
 
 pub fn test_setup(url: &str) -> (Args, Server, TempDir) {
+    let _ = log::set_logger(&*LOGGER);
+    log::set_max_level(LevelFilter::Trace);
+
     let server = Server::run();
 
     let url = server.url(url);
@@ -88,7 +95,60 @@ pub async fn generate_skiplist_json(tmpdir: &TempDir, values: Vec<&str>) -> (Pat
     (path, json)
 }
 
-pub async fn check_tmp_contents<S1, S2>(tmpdir: &TempDir, expected: &[TmpFile<S1, S2>])
+pub async fn check_results<S1, S2, S3>(
+    result: Result<Stats, Box<dyn Error + Send + Sync>>,
+    expected_result: Result<Stats, Box<dyn Error + Send + Sync>>,
+    expected_messages: &[S1],
+    server: &mut Server,
+    tmpdir: &TempDir,
+    expected_tmp: &[TmpFile<S2, S3>],
+) where
+    S1: Deref<Target = str> + Display,
+    S2: Deref<Target = str> + Display,
+    S3: Deref<Target = str> + Display,
+{
+    // Check server
+    server.verify_and_clear();
+
+    // Check result
+    match result {
+        Ok(stats) => match expected_result {
+            Ok(expected_stats) => assert_eq!(stats, expected_stats),
+            Err(expected_e) => panic!("Expected error ({expected_e}) but got Ok"),
+        },
+        Err(e) => match expected_result {
+            Ok(_) => panic!("Errored: {e}"),
+            Err(expected_e) => assert_eq!(e.to_string(), expected_e.to_string()),
+        },
+    }
+
+    // Check messages
+    let messages = LOGGER.get_messages();
+    let mut messages_ok = true;
+
+    for m1 in messages.iter() {
+        if !expected_messages.iter().any(|m2| m1.deref() == m2.deref()) {
+            println!("Message '{m1}' was not expected");
+            messages_ok = false;
+        }
+    }
+
+    for m1 in expected_messages {
+        if !messages.iter().any(|m2| m1.deref() == m2.deref()) {
+            println!("Message '{m1}' was not produced");
+            messages_ok = false;
+        }
+    }
+
+    if !messages_ok {
+        panic!("Messages incorrect")
+    }
+
+    // Check files
+    check_tmp_contents(tmpdir, expected_tmp).await;
+}
+
+async fn check_tmp_contents<S1, S2>(tmpdir: &TempDir, expected: &[TmpFile<S1, S2>])
 where
     S1: Deref<Target = str> + Display,
     S2: Deref<Target = str> + Display,
@@ -98,8 +158,8 @@ where
     dump_tmp_contents(&contents);
 
     // Check the correct files exist
-    compare_tmp_contents(&contents, expected, false);
-    compare_tmp_contents(expected, &contents, true);
+    compare_tmp_contents(&contents, expected, "Download directory", false);
+    compare_tmp_contents(expected, &contents, "Expected", true);
 }
 
 pub enum TmpFile<S1, S2> {
@@ -175,6 +235,7 @@ fn dump_tmp_contents(contents: &[TmpFile<String, String>]) {
 fn compare_tmp_contents<S1, S2, S3, S4>(
     c1: &[TmpFile<S1, S2>],
     c2: &[TmpFile<S3, S4>],
+    desc: &str,
     compare: bool,
 ) where
     S1: Deref<Target = str> + Display,
@@ -193,7 +254,7 @@ fn compare_tmp_contents<S1, S2, S3, S4>(
                             _ => None,
                         })
                         .any(|d2| { d1.deref() == d2.deref() }),
-                    "Download directory contains file {d1}, which is not expected"
+                    "{desc} contains file {d1}, which does not match"
                 );
             }
             TmpFile::File(f1, cnt1) => {
@@ -211,7 +272,7 @@ fn compare_tmp_contents<S1, S2, S3, S4>(
                         }
                     }
                     _ => {
-                        panic!("Download directory contains file {f1}, which is not expected");
+                        panic!("{desc} contains file {f1}, which does not match");
                     }
                 }
             }

@@ -3,7 +3,7 @@ use std::error::Error;
 
 use clap::Parser;
 
-use crate::output;
+use crate::output::output;
 
 #[derive(Parser, Clone, Debug)]
 #[clap(author, version, about)]

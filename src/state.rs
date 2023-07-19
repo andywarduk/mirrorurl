@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use reqwest::redirect::Policy;
 use reqwest::Client;
-use tokio::sync::{Mutex, Semaphore, SemaphorePermit};
+use tokio::sync::{Mutex, MutexGuard, Semaphore, SemaphorePermit};
 use tokio::time::{sleep, Duration};
 
 use crate::args::Args;
@@ -14,6 +14,7 @@ use crate::etags::ETags;
 use crate::output::debug;
 use crate::skip::SkipList;
 use crate::skipreason::{SkipReason, SkipReasonErr};
+use crate::stats::Stats;
 use crate::url::{Url, UrlExt};
 
 /// Program state shared between all threads
@@ -27,6 +28,7 @@ pub struct State {
     conc_sem: Semaphore,
     client: Client,
     args: Args,
+    stats: Mutex<Stats>,
 }
 
 impl State {
@@ -72,6 +74,7 @@ impl State {
             conc_sem: Semaphore::new(args.concurrent_fetch),
             client,
             args,
+            stats: Mutex::new(Stats::default()),
         })
     }
 
@@ -96,7 +99,7 @@ impl State {
     }
 
     /// Build file relative path for a given URL
-    pub fn path_for_url(&self, url: &Url) -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
+    pub async fn path_for_url(&self, url: &Url) -> Result<PathBuf, Box<dyn Error + Send + Sync>> {
         // Start with download directory
         let mut path = PathBuf::from(&self.args.target);
 
@@ -122,6 +125,21 @@ impl State {
         debug!(self, 2, "URL {url} maps to file {}", path.display());
 
         Ok(path)
+    }
+
+    /// Update stats
+    pub async fn update_stats<'a, F>(&'a self, update_fn: F)
+    where
+        F: FnOnce(MutexGuard<'a, Stats>),
+    {
+        let stats_lock = self.stats.lock().await;
+
+        update_fn(stats_lock);
+    }
+
+    /// Gets a copy of the stats
+    pub async fn get_stats(&self) -> Stats {
+        self.stats.lock().await.clone()
     }
 
     /// Looks for an etag in the etag list for a given URL
@@ -179,7 +197,6 @@ impl State {
             if attempt.previous().len() > 10 {
                 let initial = attempt.previous()[0].clone();
 
-                // TODO
                 attempt.error(SkipReasonErr::new(
                     initial.to_string(),
                     SkipReason::TooManyRedirects,

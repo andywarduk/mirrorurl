@@ -7,7 +7,6 @@ use tokio::io::AsyncWriteExt;
 
 use crate::output::{debug, error, output};
 use crate::response::Response;
-use crate::skipreason::SkipReasonErr;
 use crate::url::Url;
 use crate::ArcState;
 
@@ -17,18 +16,18 @@ pub async fn download(
     url: &Url,
     final_url: &Url,
     mut response: Response,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+) -> Result<usize, Box<dyn Error + Send + Sync>> {
     // Build full download path
-    match state.path_for_url(final_url) {
-        Ok(path) => download_to_path(state, final_url, &mut response, path).await?,
-        Err(e) if e.is::<SkipReasonErr>() => output!("{e}"),
-        Err(e) => error!("{e}"),
-    }
+    let path = state.path_for_url(final_url).await?;
+
+    // Download to file
+    let bytes = download_to_path(state, final_url, &mut response, path).await?;
 
     // Get response etag
     match response.headers().get(ETAG).map(|value| value.to_str()) {
         Some(Ok(etag)) => {
             // Add etag for original and final url (if different)
+            debug!(state, 1, "etag for {url} (final {final_url}): {etag}");
             state.add_etags(vec![url, final_url], etag).await;
         }
         Some(_) => {
@@ -39,7 +38,7 @@ pub async fn download(
         }
     }
 
-    Ok(())
+    Ok(bytes)
 }
 
 pub async fn download_to_path(
@@ -47,7 +46,7 @@ pub async fn download_to_path(
     final_url: &Url,
     response: &mut Response,
     path: PathBuf,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+) -> Result<usize, Box<dyn Error + Send + Sync>> {
     // Create directories if necessary
     if let Some(parent) = path.parent() {
         if !parent.is_dir() {
@@ -77,11 +76,14 @@ pub async fn download_to_path(
     state.debug_delay().await;
 
     // Read next chunk
+    let mut bytes = 0;
+
     while let Some(chunk) = response
         .chunk()
         .await
         .map_err(|e| format!("Error downloading chunk: {e}"))?
     {
+        bytes += chunk.len();
         debug!(state, 2, "Read {} bytes", chunk.len());
 
         // Write chunk to the file
@@ -93,5 +95,5 @@ pub async fn download_to_path(
         state.debug_delay().await;
     }
 
-    Ok(())
+    Ok(bytes)
 }
