@@ -1,6 +1,10 @@
 use std::error::Error;
 
+use futures::future::{BoxFuture, FutureExt};
 use reqwest::header::{HeaderMap, HeaderValue};
+use tokio::spawn;
+use tokio::sync::OwnedSemaphorePermit;
+use tokio::task::JoinHandle;
 
 use crate::download::download;
 use crate::html::process_html;
@@ -11,8 +15,8 @@ use crate::state::ArcState;
 use crate::url::Url;
 
 /// Handle errors and update stats wrapper for walk_internal
-pub async fn walk(state: &ArcState, url: &Url) {
-    match walk_internal(state, url).await {
+pub async fn walk(state: &ArcState, url: &Url, sem: OwnedSemaphorePermit) {
+    match walk_internal(state, url, sem).await {
         Ok(()) => {}
         Err(e) if e.is::<SkipReasonErr>() => {
             output!("{e}");
@@ -33,7 +37,11 @@ pub async fn walk(state: &ArcState, url: &Url) {
 /// Loads data from a URL. If the data is HTML, parse the document and follow links.
 /// Otherwise download the file.
 /// Use loaded etags to determine if the resource has already been downloaded and skip if so.
-async fn walk_internal(state: &ArcState, url: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
+async fn walk_internal(
+    state: &ArcState,
+    url: &Url,
+    sem: OwnedSemaphorePermit,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
     // Already seen this URL?
     if !state.add_processed_url(url.clone()).await {
         debug!(state, 1, "URL {url} has already been processed");
@@ -59,9 +67,6 @@ async fn walk_internal(state: &ArcState, url: &Url) -> Result<(), Box<dyn Error 
             error!("Previous etag value {old_etag} is not valid");
         }
     }
-
-    // Acquire a download slot
-    let sem = state.acquire_slot().await?;
 
     // Fetch the URL
     output!("Fetching {url}");
@@ -137,4 +142,21 @@ async fn walk_internal(state: &ArcState, url: &Url) -> Result<(), Box<dyn Error 
     }
 
     Ok(())
+}
+
+pub fn walk_recurse(
+    state: &ArcState,
+    url: Url,
+) -> BoxFuture<'_, Result<JoinHandle<()>, Box<dyn Error + Send + Sync>>> {
+    async move {
+        // Clone state
+        let state = state.clone();
+
+        // Acquire a download slot
+        let sem = state.acquire_slot().await?;
+
+        // Spawn a task to process the url
+        Ok(spawn(async move { walk(&state, &url, sem).await }))
+    }
+    .boxed()
 }

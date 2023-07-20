@@ -2,3 +2,4 @@
 /tests
 perf.data*
 coverage/
+/test*

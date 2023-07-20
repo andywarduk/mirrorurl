@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use reqwest::redirect::Policy;
 use reqwest::Client;
-use tokio::sync::{Mutex, MutexGuard, Semaphore, SemaphorePermit};
+use tokio::sync::{Mutex, MutexGuard, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{sleep, Duration};
 
 use crate::args::Args;
@@ -31,7 +31,7 @@ pub struct State {
     /// File skip list
     skip_list: SkipList,
     /// Concurrect fetch semaphore
-    conc_sem: Semaphore,
+    conc_sem: Arc<Semaphore>,
     /// HTTP client
     client: Client,
     /// Command line arguments
@@ -80,7 +80,7 @@ impl State {
             old_etags: etags,
             new_etags: Mutex::new(ETags::default()),
             skip_list,
-            conc_sem: Semaphore::new(args.concurrent_fetch),
+            conc_sem: Arc::new(Semaphore::new(args.concurrent_fetch)),
             client,
             args,
             stats: Mutex::new(Stats::default()),
@@ -103,8 +103,8 @@ impl State {
     }
 
     /// Acquire a download slot
-    pub async fn acquire_slot(&self) -> Result<SemaphorePermit<'_>, Box<dyn Error + Send + Sync>> {
-        Ok(self.conc_sem.acquire().await?)
+    pub async fn acquire_slot(&self) -> Result<OwnedSemaphorePermit, Box<dyn Error + Send + Sync>> {
+        Ok(self.conc_sem.clone().acquire_owned().await?)
     }
 
     /// Build file relative path for a given URL

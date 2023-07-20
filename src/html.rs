@@ -1,13 +1,14 @@
+use std::error::Error;
+
 use once_cell::sync::Lazy;
 use scraper::{Html, Selector};
-use tokio::spawn;
 use tokio::task::JoinHandle;
 
 use crate::output::{debug, output};
 use crate::skipreason::{SkipReason, SkipReasonErr};
 use crate::state::ArcState;
 use crate::url::{Url, UrlExt};
-use crate::walk::walk;
+use crate::walk::walk_recurse;
 
 /// Process all of the links in an HTML document returning a list of join handles for spawned download tasks
 pub async fn process_html(state: &ArcState, url: &Url, html: String) -> Vec<JoinHandle<()>> {
@@ -19,9 +20,14 @@ pub async fn process_html(state: &ArcState, url: &Url, html: String) -> Vec<Join
 
     // Process each href
     for href in hrefs {
-        match process_href(state, url, &href) {
-            Err(e) => {
+        match process_href(state, url, &href).await {
+            // TODO just stats.add_errored(e) to consolidate?
+            Err(e) if e.is::<SkipReasonErr>() => {
                 state.update_stats(|mut stats| stats.add_skipped()).await;
+                output!("{e}")
+            }
+            Err(e) => {
+                state.update_stats(|mut stats| stats.add_errored()).await;
                 output!("{e}")
             }
             Ok(join) => join_handles.push(join),
@@ -51,13 +57,13 @@ fn parse_html(html: String) -> Vec<String> {
 }
 
 /// Process a href on a base URL
-fn process_href(
-    state: &ArcState,
-    base_url: &Url,
-    href: &str,
-) -> Result<JoinHandle<()>, SkipReasonErr> {
+async fn process_href<'a>(
+    state: &'a ArcState,
+    base_url: &'a Url,
+    href: &'a str,
+) -> Result<JoinHandle<()>, Box<dyn Error + Send + Sync>> {
     // Join href to the base URL if necessary
-    match base_url.join(href) {
+    let join = match base_url.join(href) {
         Ok(href_url) => {
             debug!(state, 2, "href {href} of {base_url} -> {href_url}");
 
@@ -84,15 +90,14 @@ fn process_href(
                 ))?;
             }
 
-            // Clone state
-            let state = state.clone();
-
-            // Spawn a task to process the url
-            Ok(spawn(async move { walk(&state, &href_url).await }))
+            // Recurse in to this URL
+            walk_recurse(state, href_url).await?
         }
         Err(e) => Err(SkipReasonErr::new(
             href.to_string(),
             SkipReason::NotValid(e),
-        )),
-    }
+        ))?,
+    };
+
+    Ok(join)
 }
