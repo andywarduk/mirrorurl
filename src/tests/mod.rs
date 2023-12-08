@@ -166,7 +166,7 @@ async fn test_single_file_etag() {
     server.expect(
         Expectation::matching(all_of!(
             request::method_path("GET", "/file"),
-            request::headers(contains(("if-none-match", etag_value.clone()))),
+            request::headers(contains(("if-none-match", etag_value))),
         ))
         .respond_with(status_code(304)),
     );

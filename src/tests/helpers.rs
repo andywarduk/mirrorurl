@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use httptest::Server;
 use log::LevelFilter;
-use tempdir::TempDir;
+use tempfile::TempDir;
 use tokio::fs::{read_dir, read_to_string, File};
 use tokio::io::AsyncWriteExt;
 
@@ -25,7 +25,7 @@ pub fn test_setup(url: &str) -> (Args, Server, TempDir) {
 
     let url = server.url(url);
 
-    let tmpdir = TempDir::new("mirrorurl_test").expect("Failed to create tmp dir");
+    let tmpdir = TempDir::new().expect("Failed to create tmp dir");
 
     let mut path = tmpdir.path().to_path_buf();
     path.push("download");
